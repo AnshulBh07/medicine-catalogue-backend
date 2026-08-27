@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
+enum MedicineForm {
+  TABLET
+  CAPSULE
+  SYRUP
+  LIQUID
+  SUSPENSION
+  OINTMENT
+  CREAM
+  GEL
+  POWDER
+  INJECTION
+  DROPS
+  SPRAY
+  INHALER
+  LOTION
+  SOLUTION
+  OTHER
+}
+
+enum MedicinePackUnit {
+  TABLET
+  CAPSULE
+  ML
+  MG
+  G
+  PIECE
+  VIAL
+  AMPULE
+  BOTTLE
+  TUBE
+  SACHET
+  OTHER
+}
+
+enum CompositionSaltUnit {
+  MG
+  MCG
+  G
+  ML
+  IU
+  PERCENT @map("%")
+  OTHER
+}
+
+model User {
+  id                       String              @id @default(uuid()) @db.Uuid
+  name                     String              @db.VarChar(100)
+  phone                    String?             @unique @db.VarChar(20)
+  email                    String?             @unique @db.VarChar(255)
+  passwordHash             String              @db.VarChar(255)
+  role                     UserRole
+  active                   Boolean             @default(true)
+  createdAt                DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime            @updatedAt @db.Timestamptz(6)
+  commercialDetailsUpdated CommercialDetails[] @relation("CommercialDetailsUpdatedBy")
+}
+
+model Medicine {
+  id                   String           @id @default(uuid()) @db.Uuid
+  name                 String           @db.VarChar(255)
+  compositionId        String           @db.Uuid
+  form                 MedicineForm
+  packQuantity         Decimal          @db.Decimal(10, 2)
+  packUnit             MedicinePackUnit
+  shortDescription     String?          @db.Text
+  uses                 String?          @db.Text
+  recommendedAgeGroup  String?          @db.VarChar(100)
+  directions           String?          @db.Text
+  warnings             String?          @db.Text
+  storageInstructions  String?          @db.Text
+  barcode              String?          @unique @db.VarChar(100)
+  prescriptionRequired Boolean
+  manufacturerId       String           @db.Uuid
+  mrId                 String?          @db.Uuid
+  active               Boolean          @default(true)
+  createdAt            DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime         @updatedAt @db.Timestamptz(6)
+
+  composition       Composition        @relation(fields: [compositionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  manufacturer      Manufacturer       @relation(fields: [manufacturerId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  mr                MR?                @relation(fields: [mrId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  batches           Batch[]
+  commercialDetails CommercialDetails?
+}
+
+model Salt {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(255)
+  description String?  @db.Text
+  active      Boolean   @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  compositionSalts CompositionSalt[]
+}
+
+model CompositionSalt {
+  id        String              @id @default(uuid()) @db.Uuid
+  saltId    String              @db.Uuid
+  amount    Decimal             @db.Decimal(10, 3)
+  unit      CompositionSaltUnit
+  createdAt DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime            @updatedAt @db.Timestamptz(6)
+
+  salt             Salt                         @relation(fields: [saltId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  compositionLinks CompositionCompositionSalt[]
+}
+
+model Composition {
+  id          String   @id @default(uuid()) @db.Uuid
+  displayText String   @db.Text
+  description String?  @db.Text
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  medicines            Medicine[]
+  compositionSaltLinks CompositionCompositionSalt[]
+}
+
+model CompositionCompositionSalt {
+  id                String   @id @default(uuid()) @db.Uuid
+  compositionId     String   @db.Uuid
+  compositionSaltId String   @db.Uuid
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+
+  composition     Composition     @relation(fields: [compositionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  compositionSalt CompositionSalt @relation(fields: [compositionSaltId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([compositionId, compositionSaltId])
+}
+
+model Manufacturer {
+    id        String   @id @default(uuid()) @db.Uuid
+    name      String   @unique @db.VarChar(255)
+    active    Boolean  @default(true)
+    createdAt DateTime @default(now()) @db.Timestamptz(6)
+    updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  medicines Medicine[]
+}
+
+model MR {
+    id        String   @id @default(uuid()) @db.Uuid
+    name      String   @db.VarChar(150)
+    company   String?  @db.VarChar(255)
+    phone     String?  @db.VarChar(20)
+    email     String?  @db.VarChar(255)
+    notes     String?  @db.Text
+    active    Boolean  @default(true)
+    createdAt DateTime @default(now()) @db.Timestamptz(6)
+    updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  medicines Medicine[]
+}
+
+model Distributor {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String   @db.VarChar(255)
+  contactPerson     String?  @db.VarChar(150)
+  phone             String?  @db.VarChar(20)
+  email             String?  @db.VarChar(255)
+  address           String?  @db.Text
+  gstin             String?  @db.VarChar(20)
+  drugLicenseNumber String?  @db.VarChar(100)
+  notes             String?  @db.Text
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(6)
+}
+
+model Batch {
+  id                String    @id @default(uuid()) @db.Uuid
+  medicineId        String    @db.Uuid
+  batchNumber       String    @db.VarChar(100)
+  manufacturingDate DateTime? @db.Date
+  expiryDate        DateTime  @db.Date
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(6)
+
+  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([medicineId, batchNumber])
+}
+
+model CommercialDetails {
+  id              String   @id @default(uuid()) @db.Uuid
+  medicineId      String   @unique @db.Uuid
+  purchaseRate    Decimal  @db.Decimal(12, 2)
+  mrp             Decimal  @db.Decimal(12, 2)
+  discountPercent Decimal  @db.Decimal(5, 2)
+  scheme          Json?
+  privateNotes    String?  @db.Text
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+  updatedBy       String   @db.Uuid
+
+  medicine      Medicine @relation(fields: [medicineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  updatedByUser User     @relation("CommercialDetailsUpdatedBy", fields: [updatedBy], references: [id], onDelete: Restrict, onUpdate: Cascade)
+}
