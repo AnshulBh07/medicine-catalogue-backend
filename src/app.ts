@@ -1,5 +1,7 @@
+import cors from 'cors';
 import express from 'express';
 import { pinoHttp } from 'pino-http';
+import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { errorMiddleware } from './middleware/error.middleware.js';
 import { notFoundMiddleware } from './middleware/not-found.middleware.js';
@@ -9,6 +11,21 @@ export const app = express();
 
 const getRequestUrl = (request: { originalUrl?: string; url?: string }): string =>
   request.originalUrl ?? request.url ?? '';
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || env.CORS_ORIGINS.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  }),
+);
 
 app.use(express.json());
 app.use(

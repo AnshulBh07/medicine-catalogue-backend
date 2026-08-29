@@ -442,6 +442,133 @@ describe('Medicine and Batch APIs', () => {
     expect(medWithBarcode.status).toBe(201);
     expect(medWithBarcode.body.medicine.barcode).toBe('TRIMMED-BARCODE-123');
   });
+
+  it('supports optional medicine packaging imageUrl across create, update, list, and detail operations', async () => {
+    const comp = await createComposition();
+    const validImageUrl1 = 'https://cdn.example.com/medicines/packaging-box-1.png';
+    const validImageUrl2 = 'https://cdn.example.com/medicines/packaging-bottle-2.png';
+
+    // 1. Medicine can be created without an image (imageUrl is null)
+    const medNoImgRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: unique('MedNoImage'),
+        compositionId: comp.id,
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+      });
+    expect(medNoImgRes.status).toBe(201);
+    expect(medNoImgRes.body.medicine.imageUrl).toBeNull();
+    const medNoImgId = medNoImgRes.body.medicine.id;
+
+    // 2. Medicine can be created with a valid imageUrl
+    const medWithImgRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: unique('MedWithImage'),
+        compositionId: comp.id,
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        imageUrl: validImageUrl1,
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+      });
+    expect(medWithImgRes.status).toBe(201);
+    expect(medWithImgRes.body.medicine.imageUrl).toBe(validImageUrl1);
+    const medWithImgId = medWithImgRes.body.medicine.id;
+
+    // 3. Invalid imageUrl is rejected on create and update
+    const invalidCreateRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: unique('MedInvalidUrl'),
+        compositionId: comp.id,
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        imageUrl: 'not-a-valid-url',
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+      });
+    expect(invalidCreateRes.status).toBe(400);
+    expect(invalidCreateRes.body.error.code).toBe('VALIDATION_ERROR');
+
+    const invalidUpdateRes = await request(app)
+      .patch(`/api/v1/medicines/${medWithImgId}`)
+      .set(auth(tokens.admin))
+      .send({ imageUrl: 'ftp://bad url' });
+    expect(invalidUpdateRes.status).toBe(400);
+    expect(invalidUpdateRes.body.error.code).toBe('VALIDATION_ERROR');
+
+    // 4. Existing medicine without an image remains valid
+    const getNoImgRes = await request(app)
+      .get(`/api/v1/medicines/${medNoImgId}`)
+      .set(auth(tokens.employee));
+    expect(getNoImgRes.status).toBe(200);
+    expect(getNoImgRes.body.medicine.imageUrl).toBeNull();
+
+    // 5. Medicine update can add an imageUrl to a medicine with null imageUrl
+    const addImgRes = await request(app)
+      .patch(`/api/v1/medicines/${medNoImgId}`)
+      .set(auth(tokens.admin))
+      .send({ imageUrl: validImageUrl1 });
+    expect(addImgRes.status).toBe(200);
+    expect(addImgRes.body.medicine.imageUrl).toBe(validImageUrl1);
+
+    // 6. Medicine update can replace an imageUrl
+    const replaceImgRes = await request(app)
+      .patch(`/api/v1/medicines/${medNoImgId}`)
+      .set(auth(tokens.admin))
+      .send({ imageUrl: validImageUrl2 });
+    expect(replaceImgRes.status).toBe(200);
+    expect(replaceImgRes.body.medicine.imageUrl).toBe(validImageUrl2);
+
+    // 7. Medicine update can remove an image by setting imageUrl to null
+    const removeImgRes = await request(app)
+      .patch(`/api/v1/medicines/${medNoImgId}`)
+      .set(auth(tokens.admin))
+      .send({ imageUrl: null });
+    expect(removeImgRes.status).toBe(200);
+    expect(removeImgRes.body.medicine.imageUrl).toBeNull();
+
+    // 8. Omitting imageUrl during update does not remove the existing image
+    const preserveImgRes = await request(app)
+      .patch(`/api/v1/medicines/${medWithImgId}`)
+      .set(auth(tokens.admin))
+      .send({ name: 'Preserved Image Medicine' });
+    expect(preserveImgRes.status).toBe(200);
+    expect(preserveImgRes.body.medicine.name).toBe('Preserved Image Medicine');
+    expect(preserveImgRes.body.medicine.imageUrl).toBe(validImageUrl1);
+
+    // 9. Medicine list returns imageUrl
+    const listRes = await request(app)
+      .get('/api/v1/medicines')
+      .set(auth(tokens.employee));
+    expect(listRes.status).toBe(200);
+    const listedWithImg = listRes.body.medicines.find((m: { id: string }) => m.id === medWithImgId);
+    const listedNoImg = listRes.body.medicines.find((m: { id: string }) => m.id === medNoImgId);
+    expect(listedWithImg).toBeDefined();
+    expect(listedWithImg.imageUrl).toBe(validImageUrl1);
+    expect(listedNoImg).toBeDefined();
+    expect(listedNoImg.imageUrl).toBeNull();
+
+    // 10. Medicine detail returns imageUrl
+    const detailRes = await request(app)
+      .get(`/api/v1/medicines/${medWithImgId}`)
+      .set(auth(tokens.employee));
+    expect(detailRes.status).toBe(200);
+    expect(detailRes.body.medicine.imageUrl).toBe(validImageUrl1);
+  });
 });
 
 describe('CommercialDetails security', () => {

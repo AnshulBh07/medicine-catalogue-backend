@@ -76,6 +76,7 @@ model Medicine {
   packQuantity         Decimal          @db.Decimal(10, 2)
   packUnit             MedicinePackUnit
   shortDescription     String?          @db.Text
+  imageUrl             String?          @db.Text
   uses                 String?          @db.Text
   recommendedAgeGroup  String?          @db.VarChar(100)
   directions           String?          @db.Text

@@ -273,12 +273,14 @@ Configuration is validated at startup using Zod in [`src/config/env.ts`](file://
 | `JWT_EXPIRES_IN` | String | *Required* | Token expiration string (e.g. `24h`, `7d`, `1h`) |
 | `NODE_ENV` | Enum | `'development'` | Environment: `development`, `production`, `test` |
 | `PORT` | Integer | `3000` | HTTP port the server listens on |
+| `CORS_ORIGINS` | String (comma-delimited) | Dev: `http://localhost:8081,http://127.0.0.1:8081`<br>Prod: `''` | Allowed CORS origins for cross-origin client requests |
 
 ### Example `.env.development`
 
 ```env
 NODE_ENV=development
 PORT=3000
+CORS_ORIGINS=http://localhost:8081,http://127.0.0.1:8081
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/medicina_catalogue?schema=public
 JWT_SECRET=your-secure-jwt-secret-key-at-least-32-chars-long
 JWT_EXPIRES_IN=24h

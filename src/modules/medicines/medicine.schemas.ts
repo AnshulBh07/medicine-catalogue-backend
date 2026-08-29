@@ -2,6 +2,7 @@ import { $Enums } from '@prisma/client/index';
 import { z } from 'zod';
 
 const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();
+const optionalUrl = (max = 2048) => z.string().trim().url().max(max).nullable().optional();
 const packQuantity = z.coerce.number().finite().positive().max(99999999.99);
 
 const medicineFields = {
@@ -11,6 +12,7 @@ const medicineFields = {
   packQuantity,
   packUnit: z.enum($Enums.MedicinePackUnit),
   shortDescription: optionalText(100000),
+  imageUrl: optionalUrl(2048),
   uses: optionalText(100000),
   recommendedAgeGroup: optionalText(100),
   directions: optionalText(100000),

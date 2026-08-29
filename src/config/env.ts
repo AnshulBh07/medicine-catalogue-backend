@@ -10,12 +10,23 @@ dotenv.config({
   path: path.join(serverRoot, `.env.${requestedEnvironment}`),
 });
 
+const defaultDevCorsOrigins = 'http://localhost:8081,http://127.0.0.1:8081';
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default(requestedEnvironment),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().min(1),
+  CORS_ORIGINS: z
+    .string()
+    .default(requestedEnvironment === 'production' ? '' : defaultDevCorsOrigins)
+    .transform((value) =>
+      value
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter((origin) => origin.length > 0),
+    ),
 });
 
 export const env = environmentSchema.parse({
@@ -24,4 +35,5 @@ export const env = environmentSchema.parse({
   DATABASE_URL: process.env.DATABASE_URL,
   JWT_SECRET: process.env.JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN,
+  CORS_ORIGINS: process.env.CORS_ORIGINS ?? process.env.CORS_ORIGIN,
 });

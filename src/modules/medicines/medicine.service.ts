@@ -21,6 +21,7 @@ export type PublicMedicine = {
   packQuantity: number;
   packUnit: Medicine['packUnit'];
   shortDescription: string | null;
+  imageUrl: string | null;
   uses: string | null;
   recommendedAgeGroup: string | null;
   directions: string | null;
@@ -87,6 +88,7 @@ export interface MedicineStore extends ReferenceStore {
         packQuantity: number;
         packUnit: Medicine['packUnit'];
         shortDescription: string | null;
+        imageUrl: string | null;
         uses: string | null;
         recommendedAgeGroup: string | null;
         directions: string | null;
@@ -109,6 +111,7 @@ export interface MedicineStore extends ReferenceStore {
         packQuantity: number;
         packUnit: Medicine['packUnit'];
         shortDescription: string | null;
+        imageUrl: string | null;
         uses: string | null;
         recommendedAgeGroup: string | null;
         directions: string | null;
@@ -133,6 +136,7 @@ const toPublicMedicine = (medicine: MedicineRecord): PublicMedicine => ({
   packQuantity: Number(medicine.packQuantity),
   packUnit: medicine.packUnit,
   shortDescription: medicine.shortDescription,
+  imageUrl: medicine.imageUrl,
   uses: medicine.uses,
   recommendedAgeGroup: medicine.recommendedAgeGroup,
   directions: medicine.directions,
@@ -223,6 +227,7 @@ const createData = (input: CreateMedicineInput) => ({
   packQuantity: input.packQuantity,
   packUnit: input.packUnit,
   shortDescription: input.shortDescription ?? null,
+  imageUrl: input.imageUrl ?? null,
   uses: input.uses ?? null,
   recommendedAgeGroup: input.recommendedAgeGroup ?? null,
   directions: input.directions ?? null,
