@@ -74,16 +74,16 @@ const createMr = async (overrides: { company?: string | null } = {}): Promise<{ 
   return body<{ mr: { id: string } }>(response).mr;
 };
 
-const createMedicine = async (overrides: { compositionId?: string; mrId?: string | null } = {}): Promise<{ id: string }> => {
+const createMedicine = async (overrides: { name?: string; packQuantity?: number; compositionId?: string; mrId?: string | null } = {}): Promise<{ id: string }> => {
   const composition = overrides.compositionId === undefined ? await createComposition() : { id: overrides.compositionId };
   const response = await request(app)
     .post('/api/v1/medicines')
     .set(auth(tokens.admin))
     .send({
-      name: unique('Medicine'),
+      name: overrides.name ?? unique('Medicine'),
       compositionId: composition.id,
       form: 'TABLET',
-      packQuantity: 10,
+      packQuantity: overrides.packQuantity ?? 10,
       packUnit: 'TABLET',
       prescriptionRequired: false,
       manufacturerId,
@@ -597,11 +597,12 @@ describe('CommercialDetails security', () => {
     const medicine = await createMedicine({ mrId: null });
     const batch = await createBatch(medicine.id);
     const path = `/api/v1/medicines/${medicine.id}/commercial-details`;
-    await request(app).post(path).set(auth(tokens.admin)).send({ purchaseRate: 999.91, mrp: 1999.91, discountPercent: 7, scheme: { secret: 'LEAK-CHECK' }, privateNotes: 'PRIVATE-LEAK-CHECK' });
+    await request(app).post(path).set(auth(tokens.admin)).send({ purchaseRate: 888.81, mrp: 1999.91, discountPercent: 7, scheme: { secret: 'LEAK-CHECK' }, privateNotes: 'PRIVATE-LEAK-CHECK' });
     const medicineResponse = await request(app).get(`/api/v1/medicines/${medicine.id}`).set(auth(tokens.employee));
     const batchResponse = await request(app).get(`/api/v1/batches/${batch.id}`).set(auth(tokens.employee));
     for (const response of [medicineResponse, batchResponse]) {
-      expect(JSON.stringify(response.body)).not.toContain('999.91');
+      expect(JSON.stringify(response.body)).not.toContain('888.81');
+      expect(JSON.stringify(response.body)).not.toContain('purchaseRate');
       expect(JSON.stringify(response.body)).not.toContain('LEAK-CHECK');
       expect(JSON.stringify(response.body)).not.toContain('PRIVATE-LEAK-CHECK');
     }
@@ -643,6 +644,111 @@ describe('CommercialDetails security', () => {
       expect(response.status).toBe(400);
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
     }
+  });
+
+  it('handles invalid UUID, non-existent medicine, and missing commercial details correctly', async () => {
+    // 1. Invalid UUID
+    const invalidPath = '/api/v1/medicines/invalid-uuid-12345/commercial-details';
+    const invalidRes = await request(app).get(invalidPath).set(auth(tokens.admin));
+    expect(invalidRes.status).toBe(400);
+    expect(invalidRes.body.error.code).toBe('VALIDATION_ERROR');
+
+    // 2. Non-existent medicine
+    const nonExistentPath = '/api/v1/medicines/00000000-0000-4000-8000-000000000000/commercial-details';
+    const nonExistentRes = await request(app).get(nonExistentPath).set(auth(tokens.admin));
+    expect(nonExistentRes.status).toBe(404);
+    expect(nonExistentRes.body.error.code).toBe('MEDICINE_NOT_FOUND');
+
+    // 3. Medicine exists but has no CommercialDetails
+    const medicine = await createMedicine({ mrId: null });
+    const missingPath = `/api/v1/medicines/${medicine.id}/commercial-details`;
+    const missingRes = await request(app).get(missingPath).set(auth(tokens.admin));
+    expect(missingRes.status).toBe(404);
+    expect(missingRes.body.error.code).toBe('COMMERCIAL_DETAILS_NOT_FOUND');
+  });
+
+  it('supports server-side MRP filtering in GET /api/v1/medicines', async () => {
+    const medA = await createMedicine({ mrId: null });
+    const medB = await createMedicine({ mrId: null });
+    await request(app)
+      .post(`/api/v1/medicines/${medA.id}/commercial-details`)
+      .set(auth(tokens.admin))
+      .send({ purchaseRate: 20, mrp: 50, discountPercent: 5 });
+    await request(app)
+      .post(`/api/v1/medicines/${medB.id}/commercial-details`)
+      .set(auth(tokens.admin))
+      .send({ purchaseRate: 100, mrp: 250, discountPercent: 10 });
+
+    // Query with price filter [40, 100]
+    const resFiltered = await request(app)
+      .get('/api/v1/medicines?minPrice=40&maxPrice=100')
+      .set(auth(tokens.employee));
+    expect(resFiltered.status).toBe(200);
+    const ids = resFiltered.body.medicines.map((m: { id: string }) => m.id);
+    expect(ids).toContain(medA.id);
+    expect(ids).not.toContain(medB.id);
+
+    // Verify mrp field is included on PublicMedicine
+    const medAResponse = resFiltered.body.medicines.find((m: { id: string }) => m.id === medA.id);
+    expect(medAResponse.mrp).toBe(50);
+  });
+
+  it('supports server-side sorting for name, mrp, packQuantity, createdAt, updatedAt', async () => {
+    const med1 = await createMedicine({ name: 'Alpha-Medicine', packQuantity: 10, mrId: null });
+    const med2 = await createMedicine({ name: 'Beta-Medicine', packQuantity: 50, mrId: null });
+    await request(app)
+      .post(`/api/v1/medicines/${med1.id}/commercial-details`)
+      .set(auth(tokens.admin))
+      .send({ purchaseRate: 10, mrp: 100, discountPercent: 0 });
+    await request(app)
+      .post(`/api/v1/medicines/${med2.id}/commercial-details`)
+      .set(auth(tokens.admin))
+      .send({ purchaseRate: 10, mrp: 30, discountPercent: 0 });
+
+    // 1. Sort by name asc (Alpha before Beta)
+    const resNameAsc = await request(app).get('/api/v1/medicines?sortBy=name&sortOrder=asc').set(auth(tokens.employee));
+    expect(resNameAsc.status).toBe(200);
+    const namesAsc = resNameAsc.body.medicines.map((m: { name: string }) => m.name);
+    const alphaIdx1 = namesAsc.indexOf('Alpha-Medicine');
+    const betaIdx1 = namesAsc.indexOf('Beta-Medicine');
+    expect(alphaIdx1).toBeLessThan(betaIdx1);
+
+    // 2. Sort by name desc (Beta before Alpha)
+    const resNameDesc = await request(app).get('/api/v1/medicines?sortBy=name&sortOrder=desc').set(auth(tokens.employee));
+    expect(resNameDesc.status).toBe(200);
+    const namesDesc = resNameDesc.body.medicines.map((m: { name: string }) => m.name);
+    const alphaIdx2 = namesDesc.indexOf('Alpha-Medicine');
+    const betaIdx2 = namesDesc.indexOf('Beta-Medicine');
+    expect(betaIdx2).toBeLessThan(alphaIdx2);
+
+    // 3. Sort by mrp asc (med2 ₹30 before med1 ₹100)
+    const resMrpAsc = await request(app).get('/api/v1/medicines?sortBy=mrp&sortOrder=asc').set(auth(tokens.employee));
+    expect(resMrpAsc.status).toBe(200);
+    const idsMrpAsc = resMrpAsc.body.medicines.map((m: { id: string }) => m.id);
+    expect(idsMrpAsc.indexOf(med2.id)).toBeLessThan(idsMrpAsc.indexOf(med1.id));
+
+    // 4. Sort by mrp desc (med1 ₹100 before med2 ₹30)
+    const resMrpDesc = await request(app).get('/api/v1/medicines?sortBy=mrp&sortOrder=desc').set(auth(tokens.employee));
+    expect(resMrpDesc.status).toBe(200);
+    const idsMrpDesc = resMrpDesc.body.medicines.map((m: { id: string }) => m.id);
+    expect(idsMrpDesc.indexOf(med1.id)).toBeLessThan(idsMrpDesc.indexOf(med2.id));
+
+    // 5. Sort by packQuantity asc (med1 10 before med2 50)
+    const resQtyAsc = await request(app).get('/api/v1/medicines?sortBy=packQuantity&sortOrder=asc').set(auth(tokens.employee));
+    expect(resQtyAsc.status).toBe(200);
+    const idsQtyAsc = resQtyAsc.body.medicines.map((m: { id: string }) => m.id);
+    expect(idsQtyAsc.indexOf(med1.id)).toBeLessThan(idsQtyAsc.indexOf(med2.id));
+
+    // 6. Sort by packQuantity desc (med2 50 before med1 10)
+    const resQtyDesc = await request(app).get('/api/v1/medicines?sortBy=packQuantity&sortOrder=desc').set(auth(tokens.employee));
+    expect(resQtyDesc.status).toBe(200);
+    const idsQtyDesc = resQtyDesc.body.medicines.map((m: { id: string }) => m.id);
+    expect(idsQtyDesc.indexOf(med2.id)).toBeLessThan(idsQtyDesc.indexOf(med1.id));
+
+    // 7. Invalid sort field -> 400 validation error
+    const resInvalid = await request(app).get('/api/v1/medicines?sortBy=unsupportedField').set(auth(tokens.employee));
+    expect(resInvalid.status).toBe(400);
+    expect(resInvalid.body.error.code).toBe('VALIDATION_ERROR');
   });
 });
 

@@ -1,7 +1,13 @@
 import { Prisma, type Composition, type Manufacturer, type Medicine, type MR } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
-import type { CreateMedicineInput, ListMedicinesInput, UpdateMedicineInput } from './medicine.schemas.js';
+import type {
+  CreateMedicineInput,
+  ListMedicinesInput,
+  MedicineSortField,
+  SortOrder,
+  UpdateMedicineInput,
+} from './medicine.schemas.js';
 
 type CompositionReference = Pick<Composition, 'id' | 'displayText'>;
 type ManufacturerReference = Pick<Manufacturer, 'id' | 'name'>;
@@ -11,6 +17,7 @@ type MedicineRecord = Medicine & {
   composition: CompositionReference;
   manufacturer: ManufacturerReference;
   mr: MrReference | null;
+  commercialDetails: { mrp: Prisma.Decimal } | null;
 };
 
 export type PublicMedicine = {
@@ -32,6 +39,7 @@ export type PublicMedicine = {
   manufacturer: ManufacturerReference;
   mr: MrReference | null;
   active: boolean;
+  mrp: number | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -40,6 +48,7 @@ const medicineInclude = {
   composition: { select: { id: true, displayText: true } },
   manufacturer: { select: { id: true, name: true } },
   mr: { select: { id: true, name: true, company: true, phone: true } },
+  commercialDetails: { select: { mrp: true } },
 } as const;
 
 type ReferenceStore = {
@@ -72,9 +81,21 @@ export interface MedicineStore extends ReferenceStore {
         form?: Medicine['form'];
         manufacturerId?: string;
         mrId?: string;
+        commercialDetails?: {
+          mrp?: {
+            gte?: number;
+            lte?: number;
+          };
+        };
       };
       include: typeof medicineInclude;
-      orderBy: { name: 'asc' };
+      orderBy?:
+        | { name?: 'asc' | 'desc' }
+        | { packQuantity?: 'asc' | 'desc' }
+        | { createdAt?: 'asc' | 'desc' }
+        | { updatedAt?: 'asc' | 'desc' }
+        | { commercialDetails?: { mrp?: 'asc' | 'desc' } }
+        | Record<string, unknown>;
     }): PromiseLike<MedicineRecord[]>;
     findUnique(args: {
       where: { id: string };
@@ -147,6 +168,7 @@ const toPublicMedicine = (medicine: MedicineRecord): PublicMedicine => ({
   manufacturer: medicine.manufacturer,
   mr: medicine.mr,
   active: medicine.active,
+  mrp: medicine.commercialDetails ? Number(medicine.commercialDetails.mrp) : null,
   createdAt: medicine.createdAt,
   updatedAt: medicine.updatedAt,
 });
@@ -192,10 +214,34 @@ const ensureReferences = async (
   }
 };
 
+const getOrderBy = (
+  sortBy: MedicineSortField = 'name',
+  sortOrder: SortOrder = 'asc',
+) => {
+  switch (sortBy) {
+    case 'mrp':
+      return { commercialDetails: { mrp: sortOrder } };
+    case 'packQuantity':
+      return { packQuantity: sortOrder };
+    case 'createdAt':
+      return { createdAt: sortOrder };
+    case 'updatedAt':
+      return { updatedAt: sortOrder };
+    case 'name':
+    default:
+      return { name: sortOrder };
+  }
+};
+
 export const listMedicines = async (
   input: ListMedicinesInput,
   db: MedicineStore = prisma,
 ): Promise<PublicMedicine[]> => {
+  const minPrice = input.minPrice ?? input.minMrp;
+  const maxPrice = input.maxPrice ?? input.maxMrp;
+  const sortBy = input.sortBy ?? 'name';
+  const sortOrder = input.sortOrder ?? 'asc';
+
   const medicines = await db.medicine.findMany({
     where: {
       ...(input.includeInactive ? {} : { active: true }),
@@ -203,9 +249,17 @@ export const listMedicines = async (
       ...(input.form ? { form: input.form } : {}),
       ...(input.manufacturerId ? { manufacturerId: input.manufacturerId } : {}),
       ...(input.mrId ? { mrId: input.mrId } : {}),
+      ...(minPrice !== undefined || maxPrice !== undefined
+        ? {
+            commercialDetails: {
+              ...(minPrice !== undefined ? { mrp: { gte: minPrice } } : {}),
+              ...(maxPrice !== undefined ? { mrp: { lte: maxPrice } } : {}),
+            },
+          }
+        : {}),
     },
     include: medicineInclude,
-    orderBy: { name: 'asc' },
+    orderBy: getOrderBy(sortBy, sortOrder),
   });
   return medicines.map(toPublicMedicine);
 };

@@ -41,14 +41,32 @@ export const medicineIdSchema = z.object({
   id: z.string().uuid(),
 });
 
+export const medicineSortFieldSchema = z.enum([
+  'name',
+  'mrp',
+  'packQuantity',
+  'createdAt',
+  'updatedAt',
+]);
+
+export const sortOrderSchema = z.enum(['asc', 'desc']);
+
 export const listMedicinesSchema = z.object({
   search: z.string().trim().optional(),
   form: z.enum($Enums.MedicineForm).optional(),
   manufacturerId: z.string().uuid().optional(),
   mrId: z.string().uuid().optional(),
+  minPrice: z.coerce.number().min(0).optional(),
+  maxPrice: z.coerce.number().min(0).optional(),
+  minMrp: z.coerce.number().min(0).optional(),
+  maxMrp: z.coerce.number().min(0).optional(),
+  sortBy: medicineSortFieldSchema.default('name').optional(),
+  sortOrder: sortOrderSchema.default('asc').optional(),
   includeInactive: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
 });
 
+export type MedicineSortField = z.infer<typeof medicineSortFieldSchema>;
+export type SortOrder = z.infer<typeof sortOrderSchema>;
 export type CreateMedicineInput = z.infer<typeof createMedicineSchema>;
 export type UpdateMedicineInput = z.infer<typeof updateMedicineSchema>;
 export type ListMedicinesInput = z.infer<typeof listMedicinesSchema>;

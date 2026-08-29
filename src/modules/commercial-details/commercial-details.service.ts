@@ -96,6 +96,12 @@ export const getCommercialDetails = async (
   medicineId: string,
   db: CommercialDetailsStore = prisma,
 ): Promise<PublicCommercialDetails> => {
+  const medicine = await db.medicine.findUnique({
+    where: { id: medicineId },
+    select: { id: true, name: true },
+  });
+  if (!medicine) throw medicineNotFound();
+
   const details = await db.commercialDetails.findUnique({
     where: { medicineId },
     include: commercialDetailsInclude,
