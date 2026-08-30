@@ -10,6 +10,7 @@ import { batchesRouter } from '../modules/batches/batch.routes.js';
 import { commercialDetailsRouter } from '../modules/commercial-details/commercial-details.routes.js';
 import { mrsRouter } from '../modules/mrs/mr.routes.js';
 import { manufacturersRouter } from '../modules/manufacturers/manufacturer.routes.js';
+import { uploadsRouter } from '../modules/uploads/upload.routes.js';
 
 export const router = Router();
 
@@ -23,6 +24,7 @@ router.use('/batches', batchesRouter);
 router.use('/medicines', commercialDetailsRouter);
 router.use('/mrs', mrsRouter);
 router.use('/manufacturers', manufacturersRouter);
+router.use('/uploads', uploadsRouter);
 
 router.get('/health', async (_request, response) => {
   try {

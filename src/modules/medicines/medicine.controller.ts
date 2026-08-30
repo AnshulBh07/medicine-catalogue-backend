@@ -27,7 +27,7 @@ export const getMedicineController: RequestHandler = async (request, response) =
 };
 
 export const createMedicineController: RequestHandler = async (request, response) => {
-  const medicine = await createMedicine(request.body);
+  const medicine = await createMedicine(request.body, request.auth?.userId);
   response.status(201).json({ medicine });
 };
 
@@ -35,6 +35,7 @@ export const updateMedicineController: RequestHandler = async (request, response
   const medicine = await updateMedicine(
     request.params.id as string,
     request.body as UpdateMedicineInput,
+    request.auth?.userId,
   );
   response.status(200).json({ medicine });
 };

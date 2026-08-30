@@ -5,9 +5,112 @@ const optionalText = (max: number) => z.string().trim().max(max).nullable().opti
 const optionalUrl = (max = 2048) => z.string().trim().url().max(max).nullable().optional();
 const packQuantity = z.coerce.number().finite().positive().max(99999999.99);
 
+const hasMaxTwoDecimals = (value: number): boolean => {
+  const str = value.toString();
+  if (str.includes('e') || str.includes('E')) {
+    return Number(value.toFixed(2)) === value;
+  }
+  const parts = str.split('.');
+  return parts.length <= 1 || (parts[1] !== undefined && parts[1].length <= 2);
+};
+
+const money = z.coerce.number()
+  .finite()
+  .nonnegative()
+  .max(9999999999.99)
+  .refine(hasMaxTwoDecimals, {
+    message: 'Value must have at most 2 decimal places',
+  });
+
+const discountPercent = z.coerce.number()
+  .finite()
+  .min(0)
+  .max(100)
+  .refine(hasMaxTwoDecimals, {
+    message: 'Discount percent must have at most 2 decimal places',
+  });
+
+const jsonValue: z.ZodType<unknown> = z.lazy(() => z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  z.array(jsonValue),
+  z.record(z.string(), jsonValue),
+]));
+
+const hasMaxThreeDecimals = (value: number): boolean => {
+  const str = value.toString();
+  if (str.includes('e') || str.includes('E')) {
+    return Number(value.toFixed(3)) === value;
+  }
+  const parts = str.split('.');
+  return parts.length <= 1 || (parts[1] !== undefined && parts[1].length <= 3);
+};
+
+export const saltInputSchema = z
+  .object({
+    saltId: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(255).optional(),
+    saltName: z.string().trim().min(1).max(255).optional(),
+    amount: z.coerce.number()
+      .finite()
+      .positive()
+      .max(9999999.999)
+      .refine(hasMaxThreeDecimals, {
+        message: 'Strength amount must have at most 3 decimal places',
+      }),
+    unit: z.enum($Enums.CompositionSaltUnit),
+  })
+  .strict()
+  .refine((data) => Boolean(data.saltId || data.name || data.saltName), {
+    message: 'Either saltId, name, or saltName must be provided',
+  });
+
+export const commercialDetailsNestedSchema = z.object({
+  purchaseRate: money.optional().default(0),
+  mrp: money,
+  discountPercent: discountPercent.optional().default(0),
+  scheme: jsonValue.nullable().optional(),
+  privateNotes: optionalText(100000),
+}).strict();
+
+const validateDuplicateSalts = (
+  salts: Array<z.infer<typeof saltInputSchema>> | undefined,
+  context: z.RefinementCtx,
+  pathPrefix: 'salts' | 'compositionSalts',
+) => {
+  if (!salts || salts.length <= 1) return;
+  const seenNames = new Set<string>();
+  const seenIds = new Set<string>();
+  for (let i = 0; i < salts.length; i++) {
+    const s = salts[i];
+    if (!s) continue;
+    const rawName = (s.name || s.saltName)?.trim().toLowerCase();
+    if (rawName) {
+      if (seenNames.has(rawName)) {
+        context.addIssue({
+          code: 'custom',
+          path: [pathPrefix, i, s.name ? 'name' : 'saltName'],
+          message: `Duplicate salt '${s.name || s.saltName}' provided. Each salt in the composition must be unique`,
+        });
+      }
+      seenNames.add(rawName);
+    }
+    if (s.saltId) {
+      if (seenIds.has(s.saltId)) {
+        context.addIssue({
+          code: 'custom',
+          path: [pathPrefix, i, 'saltId'],
+          message: `Duplicate salt ID '${s.saltId}' provided. Each salt in the composition must be unique`,
+        });
+      }
+      seenIds.add(s.saltId);
+    }
+  }
+};
+
 const medicineFields = {
   name: z.string().trim().min(1).max(255),
-  compositionId: z.string().uuid(),
   form: z.enum($Enums.MedicineForm),
   packQuantity,
   packUnit: z.enum($Enums.MedicinePackUnit),
@@ -20,21 +123,65 @@ const medicineFields = {
   storageInstructions: optionalText(100000),
   barcode: z.string().trim().max(100).transform((val) => (val === '' ? null : val)).nullable().optional(),
   prescriptionRequired: z.boolean(),
-  manufacturerId: z.string().uuid(),
+  manufacturerId: z.string().uuid().optional(),
+  manufacturerName: z.string().trim().min(1).max(255).optional(),
   mrId: z.string().uuid().nullable().optional(),
 };
 
-export const createMedicineSchema = z.object(medicineFields).strict();
+export const createMedicineSchema = z
+  .object({
+    ...medicineFields,
+    compositionId: z.string().uuid().optional(),
+    salts: z.array(saltInputSchema).min(1).optional(),
+    compositionSalts: z.array(saltInputSchema).min(1).optional(),
+    commercialDetails: commercialDetailsNestedSchema.optional(),
+  })
+  .strict()
+  .superRefine((data, context) => {
+    const hasCompositionId = Boolean(data.compositionId);
+    const hasSalts =
+      (data.salts && data.salts.length > 0) ||
+      (data.compositionSalts && data.compositionSalts.length > 0);
+    if (!hasCompositionId && !hasSalts) {
+      context.addIssue({
+        code: 'custom',
+        path: ['compositionId'],
+        message: 'Either compositionId or a non-empty list of salts must be provided',
+      });
+    }
+
+    if (!data.manufacturerId && !data.manufacturerName) {
+      context.addIssue({
+        code: 'custom',
+        path: ['manufacturerId'],
+        message: 'Either manufacturerId or manufacturerName must be provided',
+      });
+    }
+
+    if (data.salts) validateDuplicateSalts(data.salts, context, 'salts');
+    if (data.compositionSalts) validateDuplicateSalts(data.compositionSalts, context, 'compositionSalts');
+  });
 
 export const updateMedicineSchema = z
   .object({
     ...medicineFields,
+    compositionId: z.string().uuid().optional(),
+    salts: z.array(saltInputSchema).min(1).optional(),
+    compositionSalts: z.array(saltInputSchema).min(1).optional(),
+    commercialDetails: commercialDetailsNestedSchema.optional(),
     active: z.boolean().optional(),
   })
   .partial()
   .strict()
-  .refine((value) => Object.keys(value).length > 0, {
-    message: 'At least one field must be provided',
+  .superRefine((data, context) => {
+    if (Object.keys(data).length === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'At least one field must be provided',
+      });
+    }
+    if (data.salts) validateDuplicateSalts(data.salts, context, 'salts');
+    if (data.compositionSalts) validateDuplicateSalts(data.compositionSalts, context, 'compositionSalts');
   });
 
 export const medicineIdSchema = z.object({

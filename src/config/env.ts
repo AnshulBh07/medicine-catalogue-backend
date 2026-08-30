@@ -27,6 +27,12 @@ const environmentSchema = z.object({
         .map((origin) => origin.trim())
         .filter((origin) => origin.length > 0),
     ),
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET_NAME: z.string().optional(),
+  R2_ENDPOINT: z.string().optional(),
+  R2_PUBLIC_URL: z.string().optional(),
 });
 
 export const env = environmentSchema.parse({
@@ -36,4 +42,10 @@ export const env = environmentSchema.parse({
   JWT_SECRET: process.env.JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN,
   CORS_ORIGINS: process.env.CORS_ORIGINS ?? process.env.CORS_ORIGIN,
+  R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID ?? process.env.CLOUDFLARE_ACCOUNT_ID,
+  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? process.env.CLOUDFLARE_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY ?? process.env.CLOUDFLARE_SECRET_ACCESS_KEY,
+  R2_BUCKET_NAME: process.env.R2_BUCKET_NAME ?? process.env.CLOUDFLARE_BUCKET_NAME,
+  R2_ENDPOINT: process.env.R2_ENDPOINT ?? process.env.CLOUDFLARE_ENDPOINT,
+  R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
 });

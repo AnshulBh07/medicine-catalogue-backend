@@ -2,10 +2,11 @@ import { $Enums } from '@prisma/client/index';
 import argon2 from 'argon2';
 import { decodeJwt, SignJWT } from 'jose';
 import request from 'supertest';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app.js';
 import { env } from '../src/config/env.js';
 import { prisma } from '../src/lib/prisma.js';
+import { seedDatabase } from '../src/scripts/seed.js';
 
 type UserCredentials = { email: string; phone: string; password: string };
 type TokenPair = { admin: string; employee: string };
@@ -335,21 +336,149 @@ describe('CompositionSalt and Composition APIs', () => {
 });
 
 describe('MR API', () => {
-  it('supports optional company, search, admin mutation, and employee active-only reads', async () => {
-    const mr = await createMr({ company: null });
-    const search = await request(app).get('/api/v1/mrs?search=mr').set(auth(tokens.employee));
-    expect(search.status).toBe(200);
-    expect(search.body.mrs.some((item: { id: string }) => item.id === mr.id)).toBe(true);
-    expect((await request(app).patch(`/api/v1/mrs/${mr.id}`).set(auth(tokens.employee)).send({ name: 'Denied' })).status).toBe(403);
-    expect((await request(app).patch(`/api/v1/mrs/${mr.id}`).set(auth(tokens.admin)).send({ notes: 'Updated' })).status).toBe(200);
-    expect((await request(app).delete(`/api/v1/mrs/${mr.id}`).set(auth(tokens.admin))).status).toBe(200);
-    expect((await request(app).get(`/api/v1/mrs/${mr.id}`).set(auth(tokens.employee))).status).toBe(404);
+  it('supports full CRUD, search, company filter, sorting, pagination, and associated medicines', async () => {
+    // 1. Create MR
+    const uniqueSuffix = unique('MR');
+    const mrName = `Dr. Representative ${uniqueSuffix}`;
+    const mrCompany = `Apex Pharma ${uniqueSuffix}`;
+    const mrEmail = `rep.${uniqueSuffix.toLowerCase()}@apexpharma.com`;
+    const mrPhone = '9876543210';
+
+    const createRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: mrName,
+        company: mrCompany,
+        phone: mrPhone,
+        email: mrEmail,
+        notes: 'Senior medical representative for Northern division',
+      });
+
+    expect(createRes.status).toBe(201);
+    const createdMr = createRes.body.mr;
+    expect(createdMr.name).toBe(mrName);
+    expect(createdMr.company).toBe(mrCompany);
+    expect(createdMr.phone).toBe(mrPhone);
+    expect(createdMr.email).toBe(mrEmail);
+    expect(createdMr.active).toBe(true);
+
+    // 2. Create another MR for filter/sort verification
+    const secondMrName = `A-Alpha Rep ${uniqueSuffix}`;
+    const secondCompany = `Beta Pharma ${uniqueSuffix}`;
+    const secondMrRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: secondMrName,
+        company: secondCompany,
+        phone: '9123456789',
+        email: `alpha.${uniqueSuffix.toLowerCase()}@betapharma.com`,
+      });
+    expect(secondMrRes.status).toBe(201);
+    const secondMr = secondMrRes.body.mr;
+
+    // 3. Associate Medicine with first MR
+    const medicine = await createMedicine({ mrId: createdMr.id });
+
+    // 4. Get MR Details - verify associated medicine is present
+    const detailsRes = await request(app)
+      .get(`/api/v1/mrs/${createdMr.id}`)
+      .set(auth(tokens.employee));
+    expect(detailsRes.status).toBe(200);
+    expect(detailsRes.body.mr.id).toBe(createdMr.id);
+    expect(detailsRes.body.mr.medicinesCount).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(detailsRes.body.mr.medicines)).toBe(true);
+    expect(detailsRes.body.mr.medicines.some((m: { id: string }) => m.id === medicine.id)).toBe(true);
+
+    // 5. Search by name, company, email, phone
+    const searchByName = await request(app)
+      .get(`/api/v1/mrs?search=${encodeURIComponent(mrName)}`)
+      .set(auth(tokens.employee));
+    expect(searchByName.status).toBe(200);
+    expect(searchByName.body.mrs.some((item: { id: string }) => item.id === createdMr.id)).toBe(true);
+
+    const searchByPhone = await request(app)
+      .get(`/api/v1/mrs?search=${mrPhone}`)
+      .set(auth(tokens.employee));
+    expect(searchByPhone.status).toBe(200);
+    expect(searchByPhone.body.mrs.some((item: { id: string }) => item.id === createdMr.id)).toBe(true);
+
+    // 6. Filter by company
+    const filterByCompany = await request(app)
+      .get(`/api/v1/mrs?company=${encodeURIComponent(mrCompany)}`)
+      .set(auth(tokens.employee));
+    expect(filterByCompany.status).toBe(200);
+    expect(filterByCompany.body.mrs.every((item: { company: string }) => item.company?.includes(mrCompany))).toBe(true);
+
+    // 7. Sort by name asc & desc
+    const sortAsc = await request(app)
+      .get('/api/v1/mrs?sortBy=name&sortOrder=asc')
+      .set(auth(tokens.employee));
+    expect(sortAsc.status).toBe(200);
+
+    const sortDesc = await request(app)
+      .get('/api/v1/mrs?sortBy=name&sortOrder=desc')
+      .set(auth(tokens.employee));
+    expect(sortDesc.status).toBe(200);
+
+    // 8. Pagination
+    const paginated = await request(app)
+      .get('/api/v1/mrs?page=1&limit=2')
+      .set(auth(tokens.employee));
+    expect(paginated.status).toBe(200);
+    expect(paginated.body.mrs.length).toBeLessThanOrEqual(2);
+    expect(paginated.body.page).toBe(1);
+    expect(paginated.body.limit).toBe(2);
+    expect(typeof paginated.body.total).toBe('number');
+
+    // 9. Update MR
+    const updateRes = await request(app)
+      .patch(`/api/v1/mrs/${createdMr.id}`)
+      .set(auth(tokens.admin))
+      .send({ notes: 'Updated notes with coverage territory' });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.mr.notes).toBe('Updated notes with coverage territory');
+
+    // 10. Soft-delete MR
+    const deleteRes = await request(app)
+      .delete(`/api/v1/mrs/${createdMr.id}`)
+      .set(auth(tokens.admin));
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.mr.active).toBe(false);
+
+    // Verify non-admin cannot view deactivated MR
+    const getDeleted = await request(app)
+      .get(`/api/v1/mrs/${createdMr.id}`)
+      .set(auth(tokens.employee));
+    expect(getDeleted.status).toBe(404);
+
+    // Verify Medicine referencing deactivated MR still exists
+    const getMed = await request(app)
+      .get(`/api/v1/medicines/${medicine.id}`)
+      .set(auth(tokens.employee));
+    expect(getMed.status).toBe(200);
+    expect(getMed.body.medicine.mr.id).toBe(createdMr.id);
+
+    // Cleanup second MR
+    await request(app).delete(`/api/v1/mrs/${secondMr.id}`).set(auth(tokens.admin));
   });
 
-  it('rejects invalid MR input and UUIDs', async () => {
+  it('rejects invalid MR input, invalid sort/filter, and enforces authorization', async () => {
+    // 400 on missing name
     expect((await request(app).post('/api/v1/mrs').set(auth(tokens.admin)).send({ company: 'Missing name' })).status).toBe(400);
+
+    // 400 on invalid UUID
     expect((await request(app).get('/api/v1/mrs/not-a-uuid').set(auth(tokens.employee))).status).toBe(400);
+
+    // 404 on non-existent UUID
     expect((await request(app).get('/api/v1/mrs/00000000-0000-4000-8000-000000000000').set(auth(tokens.employee))).status).toBe(404);
+
+    // 401 on unauthenticated mutation
+    expect((await request(app).post('/api/v1/mrs').send({ name: 'Unauth MR' })).status).toBe(401);
+
+    // 403 on non-admin mutation
+    expect((await request(app).post('/api/v1/mrs').set(auth(tokens.employee)).send({ name: 'Forbidden MR' })).status).toBe(403);
   });
 });
 
@@ -568,6 +697,319 @@ describe('Medicine and Batch APIs', () => {
       .set(auth(tokens.employee));
     expect(detailRes.status).toBe(200);
     expect(detailRes.body.medicine.imageUrl).toBe(validImageUrl1);
+  });
+
+  it('atomically creates medicine with multiple inline salts, commercialDetails, and reuses identical composition', async () => {
+    const saltA = await createSalt('Paracetamol-' + unique('Salt'));
+    const saltB = await createSalt('Caffeine-' + unique('Salt'));
+
+    const mr = await createMr();
+    const barcode = 'BC-' + unique('CODE');
+
+    // 1. Create medicine with 2 salts and commercialDetails inline
+    const createRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'MultiSalt Medicine ' + unique('Name'),
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        shortDescription: 'Analgesic combination',
+        imageUrl: 'https://cdn.example.com/combo.png',
+        uses: 'Headaches and pain',
+        recommendedAgeGroup: 'Adults',
+        directions: 'Take 1 tablet every 6 hours',
+        warnings: 'Do not exceed maximum daily dosage',
+        storageInstructions: 'Store in cool dry place',
+        barcode,
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: mr.id,
+        salts: [
+          { saltId: saltA.id, amount: 500, unit: 'MG' },
+          { saltId: saltB.id, amount: 65, unit: 'MG' },
+        ],
+        commercialDetails: {
+          purchaseRate: 8.5,
+          mrp: 15.0,
+          discountPercent: 10,
+          privateNotes: 'Initial commercial contract',
+        },
+      });
+
+    expect(createRes.status).toBe(201);
+    const med1 = createRes.body.medicine;
+    expect(med1.id).toBeDefined();
+    expect(med1.composition.displayText).toContain('500');
+    expect(med1.composition.displayText).toContain('65');
+    expect(med1.mrp).toBe(15);
+    expect(med1.barcode).toBe(barcode);
+    expect(med1.mr.id).toBe(mr.id);
+
+    // Verify commercialDetails record was created
+    const commRes = await request(app)
+      .get(`/api/v1/medicines/${med1.id}/commercial-details`)
+      .set(auth(tokens.admin));
+    expect(commRes.status).toBe(200);
+    expect(commRes.body.commercialDetails.purchaseRate).toBe(8.5);
+    expect(commRes.body.commercialDetails.mrp).toBe(15);
+    expect(commRes.body.commercialDetails.discountPercent).toBe(10);
+
+    // 2. Create another medicine with EXACT same salts and amounts -> must reuse existing compositionId!
+    const createRes2 = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Second MultiSalt Medicine ' + unique('Name'),
+        form: 'CAPSULE',
+        packQuantity: 20,
+        packUnit: 'CAPSULE',
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+        salts: [
+          { saltId: saltA.id, amount: 500, unit: 'MG' },
+          { saltId: saltB.id, amount: 65, unit: 'MG' },
+        ],
+      });
+
+    expect(createRes2.status).toBe(201);
+    const med2 = createRes2.body.medicine;
+    expect(med2.composition.id).toBe(med1.composition.id);
+
+    // 3. Reject duplicate barcode
+    const dupBarcodeRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Dup Barcode Med ' + unique('Name'),
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        barcode, // already used above
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+        compositionId: med1.composition.id,
+      });
+    expect(dupBarcodeRes.status).toBe(409);
+    expect(dupBarcodeRes.body.error.code).toBe('DUPLICATE_BARCODE');
+
+    // 4. Reject non-existent salt
+    const badSaltRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Bad Salt Med ' + unique('Name'),
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+        salts: [{ saltId: '00000000-0000-4000-8000-000000000000', amount: 100, unit: 'MG' }],
+      });
+    expect(badSaltRes.status).toBe(404);
+    expect(badSaltRes.body.error.code).toBe('SALT_NOT_FOUND');
+
+    // 5. Reject missing composition and salts
+    const missingCompRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Missing Comp Med ' + unique('Name'),
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        prescriptionRequired: false,
+        manufacturerId,
+        mrId: null,
+      });
+    expect(missingCompRes.status).toBe(400);
+    expect(missingCompRes.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  describe('Medicine Editing (PATCH /api/v1/medicines/:id)', () => {
+    it('handles comprehensive medicine updates including salts, commercialDetails, metadata, and relations', async () => {
+      const salt1 = await createSalt('UpdateSalt-A-' + unique('S'));
+      const salt2 = await createSalt('UpdateSalt-B-' + unique('S'));
+      const salt3 = await createSalt('UpdateSalt-C-' + unique('S'));
+      const mr1 = await createMr();
+      const mr2 = await createMr();
+      const initialBarcode = 'BC-INIT-' + unique('CODE');
+
+      // Create base medicine
+      const createRes = await request(app)
+        .post('/api/v1/medicines')
+        .set(auth(tokens.admin))
+        .send({
+          name: 'Original Med Name ' + unique('N'),
+          form: 'TABLET',
+          packQuantity: 10,
+          packUnit: 'TABLET',
+          shortDescription: 'Original description',
+          imageUrl: 'https://cdn.example.com/initial.png',
+          uses: 'Original uses',
+          recommendedAgeGroup: 'Adults',
+          directions: 'Original directions',
+          warnings: 'Original warnings',
+          storageInstructions: 'Store cool',
+          barcode: initialBarcode,
+          prescriptionRequired: false,
+          manufacturerId,
+          mrId: mr1.id,
+          salts: [{ saltId: salt1.id, amount: 250, unit: 'MG' }],
+          commercialDetails: {
+            purchaseRate: 50.0,
+            mrp: 100.0,
+            discountPercent: 10,
+            privateNotes: 'Initial commercial notes',
+          },
+        });
+      expect(createRes.status).toBe(201);
+      const medId = createRes.body.medicine.id;
+
+      // 1. Update basic fields (name, form, packQuantity, packUnit, medical fields, prescription)
+      const updateBasicRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({
+          name: 'Updated Med Name ' + unique('N'),
+          form: 'CAPSULE',
+          packQuantity: 30,
+          packUnit: 'CAPSULE',
+          shortDescription: 'Updated category',
+          uses: 'Updated therapeutic uses',
+          recommendedAgeGroup: 'Elderly',
+          directions: 'Take 2 capsules daily',
+          warnings: 'Severe warnings apply',
+          storageInstructions: 'Refrigerate 2-8 C',
+          prescriptionRequired: true,
+        });
+      expect(updateBasicRes.status).toBe(200);
+      expect(updateBasicRes.body.medicine.name).toContain('Updated Med Name');
+      expect(updateBasicRes.body.medicine.form).toBe('CAPSULE');
+      expect(updateBasicRes.body.medicine.packQuantity).toBe(30);
+      expect(updateBasicRes.body.medicine.packUnit).toBe('CAPSULE');
+      expect(updateBasicRes.body.medicine.shortDescription).toBe('Updated category');
+      expect(updateBasicRes.body.medicine.uses).toBe('Updated therapeutic uses');
+      expect(updateBasicRes.body.medicine.recommendedAgeGroup).toBe('Elderly');
+      expect(updateBasicRes.body.medicine.directions).toBe('Take 2 capsules daily');
+      expect(updateBasicRes.body.medicine.warnings).toBe('Severe warnings apply');
+      expect(updateBasicRes.body.medicine.storageInstructions).toBe('Refrigerate 2-8 C');
+      expect(updateBasicRes.body.medicine.prescriptionRequired).toBe(true);
+      // Unspecified fields preserved
+      expect(updateBasicRes.body.medicine.barcode).toBe(initialBarcode);
+      expect(updateBasicRes.body.medicine.imageUrl).toBe('https://cdn.example.com/initial.png');
+      expect(updateBasicRes.body.medicine.mr.id).toBe(mr1.id);
+
+      // 2. Update MR (switch to another MR and clear MR)
+      const switchMrRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({ mrId: mr2.id });
+      expect(switchMrRes.status).toBe(200);
+      expect(switchMrRes.body.medicine.mr.id).toBe(mr2.id);
+
+      const clearMrRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({ mrId: null });
+      expect(clearMrRes.status).toBe(200);
+      expect(clearMrRes.body.medicine.mr).toBeNull();
+
+      // 3. Update salts (add second salt, edit strength, remove salt)
+      const multiSaltRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({
+          salts: [
+            { saltId: salt1.id, amount: 500, unit: 'MG' },
+            { saltId: salt2.id, amount: 65, unit: 'MG' },
+          ],
+        });
+      expect(multiSaltRes.status).toBe(200);
+      expect(multiSaltRes.body.medicine.composition.displayText).toContain('500');
+      expect(multiSaltRes.body.medicine.composition.displayText).toContain('65');
+
+      const replaceSaltRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({
+          salts: [{ saltId: salt3.id, amount: 10, unit: 'ML' }],
+        });
+      expect(replaceSaltRes.status).toBe(200);
+      expect(replaceSaltRes.body.medicine.composition.displayText).toContain('10');
+      expect(replaceSaltRes.body.medicine.composition.displayText).toContain('ML');
+
+      // 4. Update Commercial Details & MRP
+      const commUpdateRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({
+          commercialDetails: {
+            purchaseRate: 75.5,
+            mrp: 150.0,
+            discountPercent: 15,
+            privateNotes: 'Updated supplier terms 45 days',
+          },
+        });
+      expect(commUpdateRes.status).toBe(200);
+      expect(commUpdateRes.body.medicine.mrp).toBe(150.0);
+
+      const getCommRes = await request(app)
+        .get(`/api/v1/medicines/${medId}/commercial-details`)
+        .set(auth(tokens.admin));
+      expect(getCommRes.status).toBe(200);
+      expect(getCommRes.body.commercialDetails.purchaseRate).toBe(75.5);
+      expect(getCommRes.body.commercialDetails.mrp).toBe(150.0);
+      expect(getCommRes.body.commercialDetails.discountPercent).toBe(15);
+      expect(getCommRes.body.commercialDetails.privateNotes).toBe('Updated supplier terms 45 days');
+
+      // 5. Barcode updates & duplicate barcode conflict
+      const updatedBarcode = 'BC-NEW-' + unique('CODE');
+      const updateBarcodeRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.admin))
+        .send({ barcode: updatedBarcode });
+      expect(updateBarcodeRes.status).toBe(200);
+      expect(updateBarcodeRes.body.medicine.barcode).toBe(updatedBarcode);
+
+      // Duplicate barcode conflict test
+      const med2 = await createMedicine();
+      const dupBarcodeRes = await request(app)
+        .patch(`/api/v1/medicines/${med2.id}`)
+        .set(auth(tokens.admin))
+        .send({ barcode: updatedBarcode });
+      expect(dupBarcodeRes.status).toBe(409);
+      expect(dupBarcodeRes.body.error.code).toBe('DUPLICATE_BARCODE');
+
+      // 6. Error handling: invalid UUID, not found, unauthorized
+      const badUuidRes = await request(app)
+        .patch('/api/v1/medicines/invalid-uuid')
+        .set(auth(tokens.admin))
+        .send({ name: 'Test' });
+      expect(badUuidRes.status).toBe(400);
+
+      const notFoundRes = await request(app)
+        .patch('/api/v1/medicines/00000000-0000-4000-8000-000000000000')
+        .set(auth(tokens.admin))
+        .send({ name: 'Test' });
+      expect(notFoundRes.status).toBe(404);
+      expect(notFoundRes.body.error.code).toBe('MEDICINE_NOT_FOUND');
+
+      const employeeForbiddenRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .set(auth(tokens.employee))
+        .send({ name: 'Unauthorized Name' });
+      expect(employeeForbiddenRes.status).toBe(403);
+
+      const noAuthRes = await request(app)
+        .patch(`/api/v1/medicines/${medId}`)
+        .send({ name: 'No Auth Name' });
+      expect(noAuthRes.status).toBe(401);
+    });
   });
 });
 
@@ -874,4 +1316,355 @@ describe('Manufacturer API', () => {
     expect(persisted).not.toBeNull();
     expect(persisted?.active).toBe(false);
   });
+
+  it('supports autocomplete dynamic manufacturer and salt creation and reuse during medicine create and update', async () => {
+    const novelMfgName = 'Novel Pharma ' + unique('Mfg');
+    const novelSaltA = 'NovelSaltA ' + unique('Salt');
+    const novelSaltB = 'NovelSaltB ' + unique('Salt');
+    const barcode = 'AC-' + unique('BC');
+
+    // 1. Create medicine with new manufacturer by name and new salts by name
+    const createRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Autocomplete Medicine ' + unique('Name'),
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        prescriptionRequired: false,
+        manufacturerName: novelMfgName,
+        barcode,
+        salts: [
+          { name: novelSaltA, amount: 250, unit: 'MG' },
+          { name: novelSaltB, amount: 50, unit: 'MG' },
+        ],
+      });
+
+    expect(createRes.status).toBe(201);
+    const med1 = createRes.body.medicine;
+    expect(med1.id).toBeDefined();
+    expect(med1.manufacturer.name).toBe(novelMfgName);
+    expect(med1.composition.displayText).toContain(novelSaltA);
+    expect(med1.composition.displayText).toContain(novelSaltB);
+
+    // Verify manufacturer was persisted in DB
+    const mfgRecord = await prisma.manufacturer.findUnique({ where: { id: med1.manufacturer.id } });
+    expect(mfgRecord).not.toBeNull();
+    expect(mfgRecord?.name).toBe(novelMfgName);
+
+    // Verify salts were persisted in DB
+    const saltRecordA = await prisma.salt.findFirst({ where: { name: novelSaltA } });
+    const saltRecordB = await prisma.salt.findFirst({ where: { name: novelSaltB } });
+    expect(saltRecordA).not.toBeNull();
+    expect(saltRecordB).not.toBeNull();
+
+    // 2. Create another medicine with case-insensitive existing manufacturer name and salt names -> MUST reuse existing records!
+    const createRes2 = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Second Autocomplete Medicine ' + unique('Name'),
+        form: 'CAPSULE',
+        packQuantity: 20,
+        packUnit: 'CAPSULE',
+        prescriptionRequired: false,
+        manufacturerName: novelMfgName.toLowerCase(),
+        salts: [
+          { name: novelSaltA.toUpperCase(), amount: 250, unit: 'MG' },
+          { name: novelSaltB.toLowerCase(), amount: 50, unit: 'MG' },
+        ],
+      });
+
+    expect(createRes2.status).toBe(201);
+    const med2 = createRes2.body.medicine;
+    expect(med2.manufacturer.id).toBe(med1.manufacturer.id);
+    expect(med2.composition.id).toBe(med1.composition.id);
+
+    // 3. Update medicine with a new manufacturer and a new salt
+    const updatedMfgName = 'Updated Novel Pharma ' + unique('Mfg');
+    const updatedSaltName = 'UpdatedNovelSalt ' + unique('Salt');
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/medicines/${med1.id}`)
+      .set(auth(tokens.admin))
+      .send({
+        manufacturerName: updatedMfgName,
+        salts: [
+          { name: updatedSaltName, amount: 100, unit: 'MG' },
+        ],
+      });
+
+    expect(updateRes.status).toBe(200);
+    const updatedMed = updateRes.body.medicine;
+    expect(updatedMed.manufacturer.name).toBe(updatedMfgName);
+    expect(updatedMed.composition.displayText).toContain(updatedSaltName);
+
+    // 4. Transaction rollback on barcode conflict with a new manufacturer
+    const unpersistedMfg = 'ShouldRollback Pharma ' + unique('Mfg');
+    const conflictRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Conflict Medicine',
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        prescriptionRequired: false,
+        manufacturerName: unpersistedMfg,
+        barcode, // duplicate barcode from med1
+        salts: [{ name: novelSaltA, amount: 250, unit: 'MG' }],
+      });
+
+    expect(conflictRes.status).toBe(409);
+    expect(conflictRes.body.error.code).toBe('DUPLICATE_BARCODE');
+
+    const rollbackMfg = await prisma.manufacturer.findFirst({ where: { name: unpersistedMfg } });
+    expect(rollbackMfg).toBeNull();
+  });
+
+  it('DELETE /api/v1/medicines/:id handles authorization, soft-deletion, shared entities, and catalogue exclusions', async () => {
+    // 1. Setup a medicine with a shared manufacturer, shared composition, batches, and commercial details
+    const mfgName = 'Shared Mfg ' + unique('Mfg');
+    const saltName = 'Shared Salt ' + unique('Salt');
+    const createRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Delete Target Medicine ' + unique('Med'),
+        form: 'TABLET',
+        packQuantity: 10,
+        packUnit: 'TABLET',
+        prescriptionRequired: false,
+        manufacturerName: mfgName,
+        salts: [{ name: saltName, amount: 500, unit: 'MG' }],
+        commercialDetails: {
+          mrp: 120.0,
+          purchaseRate: 90.0,
+          discountPercent: 10.0,
+        },
+      });
+
+    expect(createRes.status).toBe(201);
+    const targetMedicine = createRes.body.medicine;
+    const targetId = targetMedicine.id;
+    const mfgId = targetMedicine.manufacturer.id;
+    const compId = targetMedicine.composition.id;
+
+    // Create a batch for the target medicine
+    await prisma.batch.create({
+      data: {
+        medicineId: targetId,
+        batchNumber: 'BATCH-DEL-001',
+        expiryDate: new Date('2028-12-31'),
+      },
+    });
+
+    // Create a second medicine sharing the same manufacturer and composition
+    const secondMedRes = await request(app)
+      .post('/api/v1/medicines')
+      .set(auth(tokens.admin))
+      .send({
+        name: 'Sibling Medicine ' + unique('Med'),
+        form: 'CAPSULE',
+        packQuantity: 20,
+        packUnit: 'CAPSULE',
+        prescriptionRequired: false,
+        manufacturerName: mfgName,
+        salts: [{ name: saltName, amount: 500, unit: 'MG' }],
+      });
+
+    expect(secondMedRes.status).toBe(201);
+    const siblingMedicine = secondMedRes.body.medicine;
+
+    // 2. Authentication and Authorization checks
+    // Unauthenticated request -> 401
+    const unauthRes = await request(app).delete(`/api/v1/medicines/${targetId}`);
+    expect(unauthRes.status).toBe(401);
+
+    // Non-admin (EMPLOYEE) request -> 403
+    const forbiddenRes = await request(app)
+      .delete(`/api/v1/medicines/${targetId}`)
+      .set(auth(tokens.employee));
+    expect(forbiddenRes.status).toBe(403);
+
+    // Invalid UUID format -> 400
+    const badIdRes = await request(app)
+      .delete('/api/v1/medicines/invalid-uuid')
+      .set(auth(tokens.admin));
+    expect(badIdRes.status).toBe(400);
+
+    // Non-existent UUID -> 404
+    const notFoundRes = await request(app)
+      .delete('/api/v1/medicines/00000000-0000-4000-8000-000000000000')
+      .set(auth(tokens.admin));
+    expect(notFoundRes.status).toBe(404);
+
+    // 3. Successful Deletion (Admin)
+    const deleteRes = await request(app)
+      .delete(`/api/v1/medicines/${targetId}`)
+      .set(auth(tokens.admin));
+
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.medicine.id).toBe(targetId);
+    expect(deleteRes.body.medicine.active).toBe(false);
+
+    // 4. Verify DB State: Medicine is soft-deleted, relations intact
+    const dbMed = await prisma.medicine.findUnique({
+      where: { id: targetId },
+      include: { batches: true, commercialDetails: true },
+    });
+    expect(dbMed).not.toBeNull();
+    expect(dbMed?.active).toBe(false);
+    expect(dbMed?.batches.length).toBe(1);
+    expect(dbMed?.commercialDetails).not.toBeNull();
+
+    // 5. Shared entities remain active and untouched
+    const dbMfg = await prisma.manufacturer.findUnique({ where: { id: mfgId } });
+    expect(dbMfg?.active).toBe(true);
+
+    const dbComp = await prisma.composition.findUnique({ where: { id: compId } });
+    expect(dbComp?.active).toBe(true);
+
+    // Sibling medicine remains active
+    const dbSibling = await prisma.medicine.findUnique({ where: { id: siblingMedicine.id } });
+    expect(dbSibling?.active).toBe(true);
+
+    // 6. Catalogue exclusions: Deleted medicine disappears from normal catalogue
+    const getDeletedNormal = await request(app)
+      .get(`/api/v1/medicines/${targetId}`)
+      .set(auth(tokens.employee));
+    expect(getDeletedNormal.status).toBe(404);
+
+    const listNormal = await request(app)
+      .get('/api/v1/medicines')
+      .set(auth(tokens.employee));
+    expect(listNormal.status).toBe(200);
+    const listedIds = listNormal.body.medicines.map((m: { id: string }) => m.id);
+    expect(listedIds).not.toContain(targetId);
+    expect(listedIds).toContain(siblingMedicine.id);
+
+    // 7. Repeated deletion request is handled idempotently
+    const repeatDeleteRes = await request(app)
+      .delete(`/api/v1/medicines/${targetId}`)
+      .set(auth(tokens.admin));
+    expect(repeatDeleteRes.status).toBe(200);
+    expect(repeatDeleteRes.body.medicine.active).toBe(false);
+  });
+
+  it('manages MR medicine assignments (get, assign, reassign, unassign, conflict check)', async () => {
+    // 1. Create two MRs
+    const mr1Res = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({ name: unique('AssigneeMR1'), company: 'Pharma One', phone: '+91 99999 11111' });
+    expect(mr1Res.status).toBe(201);
+    const mr1Id = mr1Res.body.mr.id;
+
+    const mr2Res = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({ name: unique('AssigneeMR2'), company: 'Pharma Two', phone: '+91 99999 22222' });
+    expect(mr2Res.status).toBe(201);
+    const mr2Id = mr2Res.body.mr.id;
+
+    // 2. Create medicines
+    const comp = await createComposition();
+    const med1 = await createMedicine({ compositionId: comp.id, name: unique('AssignedMed1'), mrId: null });
+    const med2 = await createMedicine({ compositionId: comp.id, name: unique('AssignedMed2'), mrId: null });
+    const med3 = await createMedicine({ compositionId: comp.id, name: unique('AssignedMed3'), mrId: null });
+
+    // 3. GET /mrs/:id/medicines when empty
+    const getEmptyRes = await request(app)
+      .get(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.employee));
+    expect(getEmptyRes.status).toBe(200);
+    expect(getEmptyRes.body.medicines).toEqual([]);
+    expect(getEmptyRes.body.count).toBe(0);
+
+    // 4. Authorization checks
+    const unauthPut = await request(app)
+      .put(`/api/v1/mrs/${mr1Id}/medicines`)
+      .send({ medicineIds: [med1.id] });
+    expect(unauthPut.status).toBe(401);
+
+    const employeePut = await request(app)
+      .put(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.employee))
+      .send({ medicineIds: [med1.id] });
+    expect(employeePut.status).toBe(403);
+
+    // 5. Validation errors
+    const invalidMrId = await request(app)
+      .put('/api/v1/mrs/not-a-uuid/medicines')
+      .set(auth(tokens.admin))
+      .send({ medicineIds: [med1.id] });
+    expect(invalidMrId.status).toBe(400);
+
+    const nonExistentMr = await request(app)
+      .put('/api/v1/mrs/00000000-0000-4000-8000-000000000000/medicines')
+      .set(auth(tokens.admin))
+      .send({ medicineIds: [med1.id] });
+    expect(nonExistentMr.status).toBe(404);
+
+    const nonExistentMed = await request(app)
+      .put(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.admin))
+      .send({ medicineIds: ['00000000-0000-4000-8000-000000000000'] });
+    expect(nonExistentMed.status).toBe(404);
+
+    // 6. Assign multiple medicines to MR 1
+    const assignRes = await request(app)
+      .put(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.admin))
+      .send({ medicineIds: [med1.id, med2.id] });
+    expect(assignRes.status).toBe(200);
+    expect(assignRes.body.count).toBe(2);
+    const assignedIds = assignRes.body.medicines.map((m: { id: string }) => m.id);
+    expect(assignedIds).toContain(med1.id);
+    expect(assignedIds).toContain(med2.id);
+
+    // Verify GET /mrs/:id/medicines reflects new assignments
+    const getAssignedRes = await request(app)
+      .get(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.employee));
+    expect(getAssignedRes.status).toBe(200);
+    expect(getAssignedRes.body.count).toBe(2);
+
+    // 7. Conflict detection: MR 2 tries to assign med1 which is assigned to MR 1
+    const conflictRes = await request(app)
+      .put(`/api/v1/mrs/${mr2Id}/medicines`)
+      .set(auth(tokens.admin))
+      .send({ medicineIds: [med1.id, med3.id], allowReassign: false });
+    expect(conflictRes.status).toBe(409);
+    expect(conflictRes.body.error.code).toBe('ASSIGNMENT_CONFLICT');
+
+    // 8. Reassignment with allowReassign: true
+    const reassignRes = await request(app)
+      .put(`/api/v1/mrs/${mr2Id}/medicines`)
+      .set(auth(tokens.admin))
+      .send({ medicineIds: [med1.id, med3.id], allowReassign: true });
+    expect(reassignRes.status).toBe(200);
+    expect(reassignRes.body.count).toBe(2);
+
+    // Verify med1 is now under MR 2 and removed from MR 1
+    const mr1Check = await request(app)
+      .get(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.employee));
+    expect(mr1Check.body.count).toBe(1);
+    expect(mr1Check.body.medicines[0].id).toBe(med2.id);
+
+    // 9. Unassign all medicines from MR 1
+    const clearRes = await request(app)
+      .put(`/api/v1/mrs/${mr1Id}/medicines`)
+      .set(auth(tokens.admin))
+      .send({ medicineIds: [] });
+    expect(clearRes.status).toBe(200);
+    expect(clearRes.body.count).toBe(0);
+  });
+
+  afterAll(async () => {
+    await seedDatabase();
+  });
 });
+
