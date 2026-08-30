@@ -24,7 +24,13 @@ const mrFields = {
   notes: optionalText(100000),
 };
 
-export const createMrSchema = z.object(mrFields).strict();
+export const createMrSchema = z
+  .object({
+    ...mrFields,
+    medicineIds: z.array(z.string().uuid()).optional(),
+    allowReassign: z.boolean().optional().default(false),
+  })
+  .strict();
 
 export const updateMrSchema = z
   .object({

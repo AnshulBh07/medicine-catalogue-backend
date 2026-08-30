@@ -1804,6 +1804,122 @@ describe('Manufacturer API', () => {
     expect(clearRes.body.count).toBe(0);
   });
 
+  it('creates new MR with optional associated medicines (zero, one, multiple, conflict, atomic rollback)', async () => {
+    const comp = await createComposition();
+    const medA = await createMedicine({ compositionId: comp.id, name: unique('InitMedA'), mrId: null });
+    const medB = await createMedicine({ compositionId: comp.id, name: unique('InitMedB'), mrId: null });
+    const medC = await createMedicine({ compositionId: comp.id, name: unique('InitMedC'), mrId: null });
+
+    // 1. Create MR with zero medicines (medicineIds omitted)
+    const zeroRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: unique('ZeroMedMR'),
+        company: 'Zero Pharma',
+        phone: '+91 91111 00000',
+      });
+    expect(zeroRes.status).toBe(201);
+    expect(zeroRes.body.mr.medicinesCount).toBe(0);
+    expect(zeroRes.body.mr.medicines).toEqual([]);
+
+    // 2. Create MR with single medicine
+    const singleRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: unique('SingleMedMR'),
+        company: 'Single Pharma',
+        phone: '+91 92222 00000',
+        medicineIds: [medA.id],
+      });
+    expect(singleRes.status).toBe(201);
+    expect(singleRes.body.mr.medicinesCount).toBe(1);
+    expect(singleRes.body.mr.medicines).toHaveLength(1);
+    expect(singleRes.body.mr.medicines[0].id).toBe(medA.id);
+
+    // Verify GET /mrs/:id returns assigned medicine
+    const getSingle = await request(app)
+      .get(`/api/v1/mrs/${singleRes.body.mr.id}`)
+      .set(auth(tokens.employee));
+    expect(getSingle.status).toBe(200);
+    expect(getSingle.body.mr.medicinesCount).toBe(1);
+    expect(getSingle.body.mr.medicines[0].id).toBe(medA.id);
+
+    // 3. Create MR with multiple medicines and duplicate IDs
+    const multiRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: unique('MultiMedMR'),
+        company: 'Multi Pharma',
+        phone: '+91 93333 00000',
+        medicineIds: [medB.id, medC.id, medB.id], // duplicate medB.id
+      });
+    expect(multiRes.status).toBe(201);
+    expect(multiRes.body.mr.medicinesCount).toBe(2);
+    const multiIds = multiRes.body.mr.medicines.map((m: { id: string }) => m.id);
+    expect(multiIds).toContain(medB.id);
+    expect(multiIds).toContain(medC.id);
+
+    // 4. Non-existent medicine ID -> 404 MEDICINE_NOT_FOUND and does NOT create MR
+    const nonExistentName = unique('NonExistentMR');
+    const badMedRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: nonExistentName,
+        medicineIds: ['00000000-0000-4000-8000-000000000000'],
+      });
+    expect(badMedRes.status).toBe(404);
+    expect(badMedRes.body.error.code).toBe('MEDICINE_NOT_FOUND');
+    const checkMrNotCreated = await prisma.mR.findFirst({ where: { name: nonExistentName } });
+    expect(checkMrNotCreated).toBeNull();
+
+    // 5. Already assigned medicine conflict without allowReassign -> 409 ASSIGNMENT_CONFLICT and does NOT create MR
+    const conflictName = unique('ConflictMR');
+    const conflictRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: conflictName,
+        medicineIds: [medA.id], // already assigned to SingleMedMR
+        allowReassign: false,
+      });
+    expect(conflictRes.status).toBe(409);
+    expect(conflictRes.body.error.code).toBe('ASSIGNMENT_CONFLICT');
+    const checkConflictMr = await prisma.mR.findFirst({ where: { name: conflictName } });
+    expect(checkConflictMr).toBeNull();
+
+    // 6. Already assigned medicine with allowReassign: true -> creates MR and reassigns
+    const reassignName = unique('ReassignMR');
+    const reassignRes = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: reassignName,
+        medicineIds: [medA.id],
+        allowReassign: true,
+      });
+    expect(reassignRes.status).toBe(201);
+    expect(reassignRes.body.mr.medicinesCount).toBe(1);
+    expect(reassignRes.body.mr.medicines[0].id).toBe(medA.id);
+
+    // Verify medA was unassigned from SingleMedMR
+    const singleMrCheck = await request(app)
+      .get(`/api/v1/mrs/${singleRes.body.mr.id}`)
+      .set(auth(tokens.employee));
+    expect(singleMrCheck.body.mr.medicinesCount).toBe(0);
+    expect(singleMrCheck.body.mr.medicines).toEqual([]);
+
+    // 7. Verify MR Registry list count matches
+    const listRes = await request(app)
+      .get(`/api/v1/mrs?search=${encodeURIComponent(reassignName)}`)
+      .set(auth(tokens.employee));
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.mrs[0].medicinesCount).toBe(1);
+  });
+
   afterAll(async () => {
     await seedDatabase();
   });

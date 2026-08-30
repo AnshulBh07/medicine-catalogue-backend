@@ -212,20 +212,78 @@ export const getMr = async (
 
 export const createMr = async (
   input: CreateMrInput,
-  db: MrStore = prisma,
 ): Promise<PublicMr> => {
-  try {
-    const mr = await db.mR.create({
-      data: {
-        name: input.name,
-        company: input.company ?? null,
-        phone: input.phone ?? null,
-        email: input.email ?? null,
-        notes: input.notes ?? null,
-        active: true,
-      },
+  const uniqueIds = input.medicineIds ? [...new Set(input.medicineIds)] : [];
+
+  if (uniqueIds.length > 0) {
+    const existingMedicines = await prisma.medicine.findMany({
+      where: { id: { in: uniqueIds } },
+      include: { mr: { select: { id: true, name: true } } },
     });
-    return toPublicMr(mr);
+
+    if (existingMedicines.length !== uniqueIds.length) {
+      throw new AppError(404, 'MEDICINE_NOT_FOUND', 'One or more specified medicines do not exist');
+    }
+
+    // Check for conflict with other MR assignments
+    const conflicting = existingMedicines.filter((m) => m.mrId !== null);
+    if (conflicting.length > 0 && !input.allowReassign) {
+      const firstConflict = conflicting[0]!;
+      throw new AppError(
+        409,
+        'ASSIGNMENT_CONFLICT',
+        `Medicine '${firstConflict.name}' is already assigned to representative '${firstConflict.mr?.name || 'another representative'}'.`,
+      );
+    }
+  }
+
+  try {
+    const createdMr = await prisma.$transaction(async (tx) => {
+      const mr = await tx.mR.create({
+        data: {
+          name: input.name,
+          company: input.company ?? null,
+          phone: input.phone ?? null,
+          email: input.email ?? null,
+          notes: input.notes ?? null,
+          active: true,
+        },
+      });
+
+      if (uniqueIds.length > 0) {
+        await tx.medicine.updateMany({
+          where: { id: { in: uniqueIds } },
+          data: { mrId: mr.id },
+        });
+      }
+
+      return tx.mR.findUnique({
+        where: { id: mr.id },
+        include: {
+          _count: {
+            select: { medicines: true },
+          },
+          medicines: {
+            where: { active: true },
+            select: {
+              id: true,
+              name: true,
+              form: true,
+              manufacturer: {
+                select: { id: true, name: true },
+              },
+            },
+            orderBy: { name: 'asc' },
+          },
+        },
+      });
+    });
+
+    if (!createdMr) {
+      throw new AppError(500, 'INTERNAL_SERVER_ERROR', 'Failed to create MR');
+    }
+
+    return toPublicMr(createdMr);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw new AppError(409, 'DUPLICATE_MR', 'MR conflicts with an existing record');
