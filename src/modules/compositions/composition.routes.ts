@@ -4,8 +4,9 @@ import { requireRole } from '../../middleware/role.middleware.js';
 import { validateBody, validateParams, validateQuery } from '../../middleware/validate.middleware.js';
 import {
   createCompositionController,
-  deactivateCompositionController,
+  deleteCompositionController,
   getCompositionController,
+  getCompositionImpactController,
   listCompositionsController,
   updateCompositionController,
 } from './composition.controller.js';
@@ -30,6 +31,12 @@ compositionsRouter.get(
   validateParams(compositionIdSchema),
   getCompositionController,
 );
+compositionsRouter.get(
+  '/:id/impact',
+  authenticate,
+  validateParams(compositionIdSchema),
+  getCompositionImpactController,
+);
 compositionsRouter.post(
   '/',
   authenticate,
@@ -50,5 +57,5 @@ compositionsRouter.delete(
   authenticate,
   requireRole('ADMIN'),
   validateParams(compositionIdSchema),
-  deactivateCompositionController,
+  deleteCompositionController,
 );

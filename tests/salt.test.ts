@@ -1,4 +1,4 @@
-import type { Salt } from '@prisma/client/index';
+import type { Prisma, Salt } from '@prisma/client/index';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { authenticate, type AuthRequest } from '../src/middleware/auth.middleware.js';
 import { requireRole } from '../src/middleware/role.middleware.js';
@@ -9,7 +9,6 @@ import {
   getSalt,
   listSalts,
   updateSalt,
-  type SaltStore,
 } from '../src/modules/salts/salt.service.js';
 import {
   createSaltSchema,
@@ -28,10 +27,30 @@ const salt = (overrides: Partial<Salt> = {}): Salt => ({
   ...overrides,
 });
 
-const makeStore = (initial: Salt[] = []): SaltStore => {
+type MockStore = Prisma.TransactionClient & {
+  salt: {
+    findMany: (args: { where: { active?: boolean; name?: { contains: string; mode?: string } } }) => Promise<Salt[]>;
+    findFirst: (args: { where: { name: { equals: string; mode?: string } } }) => Promise<Salt | null>;
+    findUnique: (args: { where: { id: string } }) => Promise<Salt | null>;
+    create: (args: { data: { name: string; description: string | null; active: boolean } }) => Promise<Salt>;
+    update: (args: { where: { id: string }; data: Partial<Salt> }) => Promise<Salt>;
+  };
+  compositionSalt: {
+    findMany: () => Promise<unknown[]>;
+    deleteMany: () => Promise<unknown>;
+  };
+  composition: {
+    findUnique: () => Promise<unknown | null>;
+    update: () => Promise<unknown>;
+  };
+  $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
+};
+
+const makeStore = (initial: Salt[] = []): Prisma.TransactionClient => {
   const records = [...initial];
 
-  return {
+  const store: MockStore = {
+    $transaction: async <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => callback(store as unknown as Prisma.TransactionClient),
     salt: {
       findMany: async ({ where }) => records
         .filter((record) => where.active === undefined || record.active === where.active)
@@ -39,11 +58,15 @@ const makeStore = (initial: Salt[] = []): SaltStore => {
           where.name === undefined
           || record.name.toLowerCase().includes(where.name.contains.toLowerCase())
         ))
-        .sort((left, right) => left.name.localeCompare(right.name)),
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((record) => ({ ...record, compositionSalts: [] })),
       findFirst: async ({ where }) => records.find(
         (record) => record.name.toLowerCase() === where.name.equals.toLowerCase(),
       ) ?? null,
-      findUnique: async ({ where }) => records.find((record) => record.id === where.id) ?? null,
+      findUnique: async ({ where }) => {
+        const found = records.find((record) => record.id === where.id);
+        return found ? ({ ...found, compositionSalts: [] } as unknown as Salt) : null;
+      },
       create: async ({ data }) => {
         const created = salt({
           id: '22222222-2222-4222-8222-222222222222',
@@ -63,7 +86,17 @@ const makeStore = (initial: Salt[] = []): SaltStore => {
         return record;
       },
     },
-  };
+    compositionSalt: {
+      findMany: async () => [],
+      deleteMany: async () => ({ count: 0 }),
+    },
+    composition: {
+      findUnique: async () => null,
+      update: async () => ({}),
+    },
+  } as unknown as MockStore;
+
+  return store as unknown as Prisma.TransactionClient;
 };
 
 const makeUnauthenticatedRequest = (): AuthRequest => {

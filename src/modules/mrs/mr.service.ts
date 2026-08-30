@@ -149,6 +149,7 @@ export const listMrs = async (
       { company: { contains: term, mode: 'insensitive' } },
       { phone: { contains: term, mode: 'insensitive' } },
       { email: { contains: term, mode: 'insensitive' } },
+      { medicines: { some: { name: { contains: term, mode: 'insensitive' } } } },
     ];
   }
 

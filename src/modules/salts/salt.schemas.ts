@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-const nameSchema = z.string().trim().min(1).max(255);
+const nameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Salt name cannot be empty')
+  .max(255, 'Salt name cannot exceed 255 characters')
+  .transform((val) => val.replace(/\s+/g, ' '));
 
 export const createSaltSchema = z
   .object({
@@ -17,11 +22,11 @@ export const updateSaltSchema = z
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, {
-    message: 'At least one field must be provided',
+    message: 'At least one field must be provided for update',
   });
 
 export const saltIdSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().uuid('Invalid salt ID'),
 });
 
 export const listSaltsSchema = z.object({

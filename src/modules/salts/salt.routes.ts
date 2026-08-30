@@ -4,8 +4,9 @@ import { requireRole } from '../../middleware/role.middleware.js';
 import { validateBody, validateParams, validateQuery } from '../../middleware/validate.middleware.js';
 import {
   createSaltController,
-  deactivateSaltController,
+  deleteSaltController,
   getSaltController,
+  getSaltImpactController,
   listSaltsController,
   updateSaltController,
 } from './salt.controller.js';
@@ -15,6 +16,8 @@ export const saltsRouter = Router();
 
 saltsRouter.get('/', authenticate, validateQuery(listSaltsSchema), listSaltsController);
 saltsRouter.get('/:id', authenticate, validateParams(saltIdSchema), getSaltController);
+saltsRouter.get('/:id/impact', authenticate, validateParams(saltIdSchema), getSaltImpactController);
+
 saltsRouter.post(
   '/',
   authenticate,
@@ -22,6 +25,7 @@ saltsRouter.post(
   validateBody(createSaltSchema),
   createSaltController,
 );
+
 saltsRouter.patch(
   '/:id',
   authenticate,
@@ -30,10 +34,11 @@ saltsRouter.patch(
   validateBody(updateSaltSchema),
   updateSaltController,
 );
+
 saltsRouter.delete(
   '/:id',
   authenticate,
   requireRole('ADMIN'),
   validateParams(saltIdSchema),
-  deactivateSaltController,
+  deleteSaltController,
 );

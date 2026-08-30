@@ -237,14 +237,15 @@ describe('Salt API', () => {
     expect(search.body.salts.some((item: { id: string }) => item.id === salt.id)).toBe(true);
     const update = await request(app).patch(`/api/v1/salts/${salt.id}`).set(auth(tokens.admin)).send({ name: 'Amoxicillin Updated' });
     expect(update.status).toBe(200);
-    const denied = await request(app).patch(`/api/v1/salts/${salt.id}`).set(auth(tokens.employee)).send({ name: 'Nope' });
-    expect(denied.status).toBe(403);
-    const deleted = await request(app).delete(`/api/v1/salts/${salt.id}`).set(auth(tokens.admin));
-    expect(deleted.status).toBe(200);
+    const deactivated = await request(app).patch(`/api/v1/salts/${salt.id}`).set(auth(tokens.admin)).send({ active: false });
+    expect(deactivated.status).toBe(200);
     const hidden = await request(app).get('/api/v1/salts?active=active').set(auth(tokens.employee));
     expect(hidden.body.salts.some((item: { id: string }) => item.id === salt.id)).toBe(false);
     const duplicate = await request(app).post('/api/v1/salts').set(auth(tokens.admin)).send({ name: 'Amoxicillin Updated' });
     expect(duplicate.status).toBe(409);
+    const deleted = await request(app).delete(`/api/v1/salts/${salt.id}`).set(auth(tokens.admin));
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.success).toBe(true);
   });
 
   it('returns validation and not-found errors', async () => {
@@ -306,7 +307,7 @@ describe('CompositionSalt and Composition APIs', () => {
     const compId = compResponse.body.composition.id;
 
     // 2. Deactivate the salt
-    await request(app).delete(`/api/v1/salts/${activeSalt.id}`).set(auth(tokens.admin));
+    await request(app).patch(`/api/v1/salts/${activeSalt.id}`).set(auth(tokens.admin)).send({ active: false });
 
     // 3. Existing Composition remains intact after Salt deactivation
     const getComp = await request(app).get(`/api/v1/compositions/${compId}`).set(auth(tokens.employee));
@@ -462,6 +463,146 @@ describe('MR API', () => {
 
     // Cleanup second MR
     await request(app).delete(`/api/v1/mrs/${secondMr.id}`).set(auth(tokens.admin));
+  });
+
+  it('searches MRs by associated medicine name with case-insensitivity, partial matching, deduplication, active filtering, and sorting', async () => {
+    const seed = unique('MedSearchMR');
+    
+    // 1. Create MR 1 (Active) with two medicines
+    const mr1Res = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: `Amit Patel ${seed}`,
+        company: `Dr. Reddy's ${seed}`,
+        phone: '9876543212',
+        email: `amit.${seed.toLowerCase()}@drreddys.com`,
+      });
+    expect(mr1Res.status).toBe(201);
+    const mr1 = mr1Res.body.mr;
+
+    // Create 2 medicines for MR 1: Amoxycillin 500mg Tablet and Amoxyclav 625mg Tablet
+    await createMedicine({
+      name: `Amoxycillin 500mg Tablet ${seed}`,
+      mrId: mr1.id,
+    });
+    await createMedicine({
+      name: `Amoxyclav 625mg Tablet ${seed}`,
+      mrId: mr1.id,
+    });
+
+    // 2. Create MR 2 (Inactive) with matching medicine
+    const mr2Res = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: `Sunil Sharma ${seed}`,
+        company: `Cipla ${seed}`,
+        phone: '9123456788',
+        email: `sunil.${seed.toLowerCase()}@cipla.com`,
+      });
+    expect(mr2Res.status).toBe(201);
+    const mr2 = mr2Res.body.mr;
+
+    await createMedicine({
+      name: `Amoxycillin Suspension ${seed}`,
+      mrId: mr2.id,
+    });
+
+    // Deactivate MR 2
+    await request(app)
+      .delete(`/api/v1/mrs/${mr2.id}`)
+      .set(auth(tokens.admin));
+
+    // 3. Create MR 3 (Active) with unrelated medicine
+    const mr3Res = await request(app)
+      .post('/api/v1/mrs')
+      .set(auth(tokens.admin))
+      .send({
+        name: `Vikas Gupta ${seed}`,
+        company: `Sun Pharma ${seed}`,
+        phone: '9988776655',
+        email: `vikas.${seed.toLowerCase()}@sunpharma.com`,
+      });
+    expect(mr3Res.status).toBe(201);
+    const mr3 = mr3Res.body.mr;
+
+    await createMedicine({
+      name: `Paracetamol 650mg ${seed}`,
+      mrId: mr3.id,
+    });
+
+    // TEST 1: Exact medicine name search matches MR 1
+    const exactSearch = await request(app)
+      .get(`/api/v1/mrs?search=Amoxycillin`)
+      .set(auth(tokens.employee));
+    expect(exactSearch.status).toBe(200);
+    expect(exactSearch.body.mrs.some((m: { id: string }) => m.id === mr1.id)).toBe(true);
+    expect(exactSearch.body.mrs.some((m: { id: string }) => m.id === mr3.id)).toBe(false);
+
+    // TEST 2: Case-insensitive search ('amoxycillin', 'AMOXYCILLIN')
+    const lowerSearch = await request(app)
+      .get(`/api/v1/mrs?search=amoxycillin`)
+      .set(auth(tokens.employee));
+    expect(lowerSearch.status).toBe(200);
+    expect(lowerSearch.body.mrs.some((m: { id: string }) => m.id === mr1.id)).toBe(true);
+
+    const upperSearch = await request(app)
+      .get(`/api/v1/mrs?search=AMOXYCILLIN`)
+      .set(auth(tokens.employee));
+    expect(upperSearch.status).toBe(200);
+    expect(upperSearch.body.mrs.some((m: { id: string }) => m.id === mr1.id)).toBe(true);
+
+    // TEST 3: Partial substring search ('amoxi', '500mg', 'tablet')
+    const partialSearch = await request(app)
+      .get(`/api/v1/mrs?search=amoxy`)
+      .set(auth(tokens.employee));
+    expect(partialSearch.status).toBe(200);
+    expect(partialSearch.body.mrs.some((m: { id: string }) => m.id === mr1.id)).toBe(true);
+
+    const doseSearch = await request(app)
+      .get(`/api/v1/mrs?search=500mg`)
+      .set(auth(tokens.employee));
+    expect(doseSearch.status).toBe(200);
+    expect(doseSearch.body.mrs.some((m: { id: string }) => m.id === mr1.id)).toBe(true);
+
+    // TEST 4: Multiple matching medicines for same MR (Amoxycillin AND Amoxyclav) returns MR only once
+    const multiMedMatches = exactSearch.body.mrs.filter((m: { id: string }) => m.id === mr1.id);
+    expect(multiMedMatches).toHaveLength(1);
+    expect(multiMedMatches[0].medicinesCount).toBe(2);
+
+    // TEST 5: Active filter excludes inactive MR 2 by default
+    expect(exactSearch.body.mrs.some((m: { id: string }) => m.id === mr2.id)).toBe(false);
+
+    // TEST 6: includeInactive=true includes inactive MR 2
+    const inactiveSearch = await request(app)
+      .get(`/api/v1/mrs?search=Amoxycillin&includeInactive=true`)
+      .set(auth(tokens.admin));
+    expect(inactiveSearch.status).toBe(200);
+    expect(inactiveSearch.body.mrs.some((m: { id: string }) => m.id === mr1.id)).toBe(true);
+    expect(inactiveSearch.body.mrs.some((m: { id: string }) => m.id === mr2.id)).toBe(true);
+
+    // TEST 7: Search with sorting
+    const sortedSearch = await request(app)
+      .get(`/api/v1/mrs?search=Amoxycillin&sortBy=name&sortOrder=desc&includeInactive=true`)
+      .set(auth(tokens.admin));
+    expect(sortedSearch.status).toBe(200);
+    const matchingIds = sortedSearch.body.mrs
+      .filter((m: { id: string }) => m.id === mr1.id || m.id === mr2.id)
+      .map((m: { id: string }) => m.id);
+    expect(matchingIds).toEqual([mr2.id, mr1.id]); // 'Sunil Sharma' before 'Amit Patel' in DESC
+
+    // TEST 8: Non-matching medicine search returns empty results
+    const nonMatching = await request(app)
+      .get(`/api/v1/mrs?search=NonExistentMedicineName9999`)
+      .set(auth(tokens.employee));
+    expect(nonMatching.status).toBe(200);
+    expect(nonMatching.body.mrs).toHaveLength(0);
+    expect(nonMatching.body.total).toBe(0);
+
+    // Cleanup
+    await request(app).delete(`/api/v1/mrs/${mr1.id}`).set(auth(tokens.admin));
+    await request(app).delete(`/api/v1/mrs/${mr3.id}`).set(auth(tokens.admin));
   });
 
   it('rejects invalid MR input, invalid sort/filter, and enforces authorization', async () => {

@@ -2,6 +2,7 @@ import { Prisma, type Composition, type CompositionSalt, type Manufacturer, type
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
 import { r2StorageService } from '../../services/storage/r2.service.js';
+import { formatCompositionDisplayText } from '../compositions/composition.utils.js';
 import type {
   CreateMedicineInput,
   ListMedicinesInput,
@@ -437,9 +438,7 @@ const resolveCompositionFromSalts = async (
     return matchingComp.id;
   }
 
-  const displayText = resolvedSalts
-    .map((s) => `${s.name} ${s.amount} ${s.unit}`)
-    .join(' + ');
+  const displayText = formatCompositionDisplayText(resolvedSalts);
 
   const newComp = await tx.composition.create({
     data: {

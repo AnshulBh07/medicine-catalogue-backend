@@ -3,7 +3,9 @@ import { AppError } from '../../common/errors/app-error.js';
 import {
   createComposition,
   deactivateComposition,
+  deleteComposition,
   getComposition,
+  getCompositionImpact,
   listCompositions,
   updateComposition,
 } from './composition.service.js';
@@ -26,6 +28,11 @@ export const getCompositionController: RequestHandler = async (request, response
   response.status(200).json({ composition });
 };
 
+export const getCompositionImpactController: RequestHandler = async (request, response) => {
+  const impact = await getCompositionImpact(request.params.id as string);
+  response.status(200).json({ impact });
+};
+
 export const createCompositionController: RequestHandler = async (request, response) => {
   const composition = await createComposition(request.body);
   response.status(201).json({ composition });
@@ -42,4 +49,9 @@ export const updateCompositionController: RequestHandler = async (request, respo
 export const deactivateCompositionController: RequestHandler = async (request, response) => {
   const composition = await deactivateComposition(request.params.id as string);
   response.status(200).json({ composition });
+};
+
+export const deleteCompositionController: RequestHandler = async (request, response) => {
+  const result = await deleteComposition(request.params.id as string);
+  response.status(200).json(result);
 };
