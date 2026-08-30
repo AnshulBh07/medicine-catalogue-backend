@@ -125,6 +125,13 @@ export class R2StorageService {
     return `medicines/${medicineUuid}/packaging-${fileUuid}.${extension}`;
   }
 
+  public generateProfileImageObjectKey(userId: string, contentType: AllowedImageMimeType): string {
+    const extension = MIME_TO_EXTENSION[contentType] || 'jpg';
+    const fileUuid = crypto.randomUUID();
+    const cleanUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+    return `profile-images/${cleanUserId}/avatar-${fileUuid}.${extension}`;
+  }
+
   public getObjectKeyFromUrl(url: string | null | undefined): string | null {
     if (!url || typeof url !== 'string') return null;
 
@@ -144,11 +151,11 @@ export class R2StorageService {
     try {
       const parsed = new URL(trimmed);
       const pathname = parsed.pathname.replace(/^\/+/, '');
-      if (pathname.startsWith('medicines/')) {
+      if (pathname.startsWith('medicines/') || pathname.startsWith('profile-images/')) {
         return pathname;
       }
     } catch {
-      if (trimmed.startsWith('medicines/')) {
+      if (trimmed.startsWith('medicines/') || trimmed.startsWith('profile-images/')) {
         return trimmed;
       }
     }
@@ -194,6 +201,52 @@ export class R2StorageService {
     this.validateConfig();
     const config = this.getConfig();
     const objectKey = this.generateObjectKey(normalizedMime);
+    const publicUrl = this.buildPublicUrl(objectKey);
+
+    const s3Client = this.getS3Client();
+
+    const command = new PutObjectCommand({
+      Bucket: config.bucketName,
+      Key: objectKey,
+      ContentType: normalizedMime === 'image/jpg' ? 'image/jpeg' : normalizedMime,
+    });
+
+    const uploadUrl = await getSignedUrl(s3Client, command, {
+      expiresIn: PRESIGNED_URL_EXPIRATION_SECONDS,
+    });
+
+    return {
+      uploadUrl,
+      objectKey,
+      publicUrl,
+    };
+  }
+
+  public async createPresignedProfileImageUploadUrl(
+    userId: string,
+    input: PresignedUploadRequest,
+  ): Promise<PresignedUploadResponse> {
+    const normalizedMime = input.contentType?.toLowerCase()?.trim() as AllowedImageMimeType;
+
+    if (!ALLOWED_IMAGE_MIME_TYPES.includes(normalizedMime)) {
+      throw new AppError(
+        400,
+        'INVALID_CONTENT_TYPE',
+        `Unsupported image type '${input.contentType}'. Allowed types: ${ALLOWED_IMAGE_MIME_TYPES.join(', ')}`,
+      );
+    }
+
+    if (input.fileSize !== undefined && input.fileSize > MAX_IMAGE_FILE_SIZE_BYTES) {
+      throw new AppError(
+        400,
+        'FILE_TOO_LARGE',
+        `Image size exceeds the maximum allowed limit of ${MAX_IMAGE_FILE_SIZE_BYTES / (1024 * 1024)}MB`,
+      );
+    }
+
+    this.validateConfig();
+    const config = this.getConfig();
+    const objectKey = this.generateProfileImageObjectKey(userId, normalizedMime);
     const publicUrl = this.buildPublicUrl(objectKey);
 
     const s3Client = this.getS3Client();

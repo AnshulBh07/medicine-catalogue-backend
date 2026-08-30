@@ -39,7 +39,35 @@ export const cleanupUploadSchema = z
     message: 'Either objectKey or publicUrl must be provided for cleanup',
   });
 
+export const createProfileImageUploadUrlSchema = z
+  .object({
+    contentType: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .refine(
+        (val) => (ALLOWED_IMAGE_MIME_TYPES as readonly string[]).includes(val),
+        {
+          message: `contentType must be one of: ${ALLOWED_IMAGE_MIME_TYPES.join(', ')}`,
+        },
+      ),
+    fileSize: z
+      .coerce
+      .number()
+      .finite()
+      .positive()
+      .max(MAX_IMAGE_FILE_SIZE_BYTES, {
+        message: `fileSize must not exceed ${MAX_IMAGE_FILE_SIZE_BYTES / (1024 * 1024)}MB`,
+      })
+      .optional(),
+    fileName: z.string().trim().max(255).optional(),
+  })
+  .strict();
+
 export type CreateMedicineImageUploadUrlInput = z.infer<
   typeof createMedicineImageUploadUrlSchema
+>;
+export type CreateProfileImageUploadUrlInput = z.infer<
+  typeof createProfileImageUploadUrlSchema
 >;
 export type CleanupUploadInput = z.infer<typeof cleanupUploadSchema>;

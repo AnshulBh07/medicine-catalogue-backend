@@ -5,12 +5,20 @@ import {
 import type {
   CleanupUploadInput,
   CreateMedicineImageUploadUrlInput,
+  CreateProfileImageUploadUrlInput,
 } from './upload.schemas.js';
 
 export const createMedicineImageUploadUrl = async (
   input: CreateMedicineImageUploadUrlInput,
 ): Promise<PresignedUploadResponse> => {
   return r2StorageService.createPresignedUploadUrl(input);
+};
+
+export const createProfileImageUploadUrl = async (
+  userId: string,
+  input: CreateProfileImageUploadUrlInput,
+): Promise<PresignedUploadResponse> => {
+  return r2StorageService.createPresignedProfileImageUploadUrl(userId, input);
 };
 
 export const cleanupMedicineImageUpload = async (

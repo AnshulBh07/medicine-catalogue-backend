@@ -16,4 +16,14 @@ export const createUserSchema = z
     path: ['identifier'],
   });
 
+export const updateProfileSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    email: z.string().trim().toLowerCase().email().max(255).optional().nullable(),
+    phone: z.string().trim().min(7).max(20).optional().nullable(),
+    profileImageUrl: z.string().trim().max(2048).optional().nullable(),
+  })
+  .strict();
+
 export type CreateUserInput = z.infer<typeof createUserSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

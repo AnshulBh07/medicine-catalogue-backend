@@ -27,6 +27,7 @@ const makeUser = async (overrides: Partial<{
   active: boolean;
   email: string | null;
   phone: string | null;
+  profileImageUrl: string | null;
 }> = {}) => ({
   id: '11111111-1111-1111-1111-111111111111',
   name: 'Admin User',
@@ -34,6 +35,7 @@ const makeUser = async (overrides: Partial<{
   email: overrides.email ?? 'admin@example.com',
   passwordHash: await argon2.hash(password),
   role: $Enums.UserRole.ADMIN,
+  profileImageUrl: overrides.profileImageUrl ?? null,
   active: overrides.active ?? true,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -44,8 +46,8 @@ describe('authentication service', () => {
     vi.restoreAllMocks();
   });
 
-  it('logs in successfully and returns no passwordHash', async () => {
-    const user = await makeUser();
+  it('logs in successfully and returns no passwordHash with profileImageUrl null', async () => {
+    const user = await makeUser({ profileImageUrl: null });
     const store = { user: { findFirst: vi.fn().mockResolvedValue(user) } };
 
     const result = await login({ identifier: user.email!, password }, store);
@@ -53,8 +55,19 @@ describe('authentication service', () => {
 
     expect(result.user).not.toHaveProperty('passwordHash');
     expect(result.user.email).toBe(user.email);
+    expect(result.user.profileImageUrl).toBeNull();
     expect(claims).toEqual({ userId: user.id, role: $Enums.UserRole.ADMIN });
     expect(result.accessToken).not.toContain(password);
+  });
+
+  it('logs in successfully and returns profileImageUrl when present', async () => {
+    const testUrl = 'https://images.example.com/profile-images/user-123/avatar.jpg';
+    const user = await makeUser({ profileImageUrl: testUrl });
+    const store = { user: { findFirst: vi.fn().mockResolvedValue(user) } };
+
+    const result = await login({ identifier: user.email!, password }, store);
+
+    expect(result.user.profileImageUrl).toBe(testUrl);
   });
 
   it.each([

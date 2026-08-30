@@ -62,6 +62,7 @@ model User {
   email                    String?             @unique @db.VarChar(255)
   passwordHash             String              @db.VarChar(255)
   role                     UserRole
+  profileImageUrl          String?             @db.Text
   active                   Boolean             @default(true)
   createdAt                DateTime            @default(now()) @db.Timestamptz(6)
   updatedAt                DateTime            @updatedAt @db.Timestamptz(6)
