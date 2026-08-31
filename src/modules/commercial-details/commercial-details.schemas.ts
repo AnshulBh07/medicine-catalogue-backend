@@ -38,6 +38,10 @@ export const commercialDetailsMedicineIdSchema = z.object({
   medicineId: z.string().uuid(),
 });
 
+export const commercialDetailsBatchIdSchema = z.object({
+  batchId: z.string().uuid(),
+});
+
 const commercialDetailsFields = {
   purchaseRate: money,
   mrp: money,

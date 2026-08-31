@@ -349,7 +349,13 @@ export const getMrMedicines = async (
       composition: { select: { id: true, displayText: true } },
       manufacturer: { select: { id: true, name: true } },
       mr: { select: { id: true, name: true, company: true, phone: true } },
-      commercialDetails: { select: { mrp: true } },
+      batches: {
+        orderBy: { createdAt: 'desc' as const },
+        take: 1,
+        include: {
+          commercialDetails: { select: { mrp: true } },
+        },
+      },
     },
     orderBy: { name: 'asc' },
   });
@@ -373,7 +379,7 @@ export const getMrMedicines = async (
     manufacturer: m.manufacturer,
     mr: m.mr,
     active: m.active,
-    mrp: m.commercialDetails ? Number(m.commercialDetails.mrp) : null,
+    mrp: m.batches[0]?.commercialDetails ? Number(m.batches[0].commercialDetails.mrp) : null,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   }));
@@ -441,7 +447,13 @@ export const assignMrMedicines = async (
         composition: { select: { id: true, displayText: true } },
         manufacturer: { select: { id: true, name: true } },
         mr: { select: { id: true, name: true, company: true, phone: true } },
-        commercialDetails: { select: { mrp: true } },
+        batches: {
+          orderBy: { createdAt: 'desc' as const },
+          take: 1,
+          include: {
+            commercialDetails: { select: { mrp: true } },
+          },
+        },
       },
       orderBy: { name: 'asc' },
     });
@@ -466,7 +478,7 @@ export const assignMrMedicines = async (
     manufacturer: m.manufacturer,
     mr: m.mr,
     active: m.active,
-    mrp: m.commercialDetails ? Number(m.commercialDetails.mrp) : null,
+    mrp: m.batches[0]?.commercialDetails ? Number(m.batches[0].commercialDetails.mrp) : null,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   }));

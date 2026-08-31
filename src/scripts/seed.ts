@@ -576,9 +576,18 @@ export async function seedDatabase() {
       },
     });
 
-    await prisma.commercialDetails.create({
+    const batch = await prisma.batch.create({
       data: {
         medicineId: medicine.id,
+        batchNumber: 'BATCH-2026-001',
+        manufacturingDate: new Date('2026-01-01'),
+        expiryDate: new Date('2028-01-01'),
+      },
+    });
+
+    await prisma.commercialDetails.create({
+      data: {
+        batchId: batch.id,
         purchaseRate: mDef.purchaseRate,
         mrp: mDef.mrp,
         discountPercent: mDef.discountPercent,

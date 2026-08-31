@@ -7,6 +7,7 @@ import {
   getBatchController,
   listBatchesController,
   updateBatchController,
+  deleteBatchController,
 } from './batch.controller.js';
 import { batchIdSchema, createBatchSchema, listBatchesSchema, updateBatchSchema } from './batch.schemas.js';
 
@@ -28,4 +29,11 @@ batchesRouter.patch(
   validateParams(batchIdSchema),
   validateBody(updateBatchSchema),
   updateBatchController,
+);
+batchesRouter.delete(
+  '/:id',
+  authenticate,
+  requireRole('ADMIN'),
+  validateParams(batchIdSchema),
+  deleteBatchController,
 );

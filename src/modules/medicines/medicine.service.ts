@@ -1,7 +1,8 @@
-import { Prisma, type Composition, type CompositionSalt, type Manufacturer, type Medicine, type MR } from '@prisma/client/index';
+import { Prisma, type Batch, type CommercialDetails, type Composition, type CompositionSalt, type Manufacturer, type Medicine, type MR, type User } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
 import { r2StorageService } from '../../services/storage/r2.service.js';
+import { getLatestBatchForMedicine } from '../batches/batch.service.js';
 import { formatCompositionDisplayText } from '../compositions/composition.utils.js';
 import type {
   CreateMedicineInput,
@@ -14,12 +15,21 @@ import type {
 type CompositionReference = Pick<Composition, 'id' | 'displayText'>;
 type ManufacturerReference = Pick<Manufacturer, 'id' | 'name'>;
 type MrReference = Pick<MR, 'id' | 'name' | 'company' | 'phone'>;
+type UserReference = Pick<User, 'id' | 'name'>;
+
+type CommercialDetailsRecord = CommercialDetails & {
+  updatedByUser: UserReference;
+};
+
+type BatchWithCommercial = Batch & {
+  commercialDetails: CommercialDetailsRecord | null;
+};
 
 type MedicineRecord = Medicine & {
   composition: CompositionReference;
   manufacturer: ManufacturerReference;
   mr: MrReference | null;
-  commercialDetails: { mrp: Prisma.Decimal } | null;
+  batches: BatchWithCommercial[];
 };
 
 export type PublicMedicine = {
@@ -50,7 +60,17 @@ const medicineInclude = {
   composition: { select: { id: true, displayText: true } },
   manufacturer: { select: { id: true, name: true } },
   mr: { select: { id: true, name: true, company: true, phone: true } },
-  commercialDetails: { select: { mrp: true } },
+  batches: {
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    include: {
+      commercialDetails: {
+        include: {
+          updatedByUser: { select: { id: true, name: true } },
+        },
+      },
+    },
+  },
 } as const;
 
 type ReferenceStore = {
@@ -83,10 +103,14 @@ export interface MedicineStore extends ReferenceStore {
         form?: Medicine['form'];
         manufacturerId?: string;
         mrId?: string;
-        commercialDetails?: {
-          mrp?: {
-            gte?: number;
-            lte?: number;
+        batches?: {
+          some?: {
+            commercialDetails?: {
+              mrp?: {
+                gte?: number;
+                lte?: number;
+              };
+            };
           };
         };
       };
@@ -96,7 +120,6 @@ export interface MedicineStore extends ReferenceStore {
         | { packQuantity?: 'asc' | 'desc' }
         | { createdAt?: 'asc' | 'desc' }
         | { updatedAt?: 'asc' | 'desc' }
-        | { commercialDetails?: { mrp?: 'asc' | 'desc' } }
         | Record<string, unknown>;
     }): PromiseLike<MedicineRecord[]>;
     findUnique(args: {
@@ -151,29 +174,34 @@ export interface MedicineStore extends ReferenceStore {
   };
 }
 
-const toPublicMedicine = (medicine: MedicineRecord): PublicMedicine => ({
-  id: medicine.id,
-  name: medicine.name,
-  composition: medicine.composition,
-  form: medicine.form,
-  packQuantity: Number(medicine.packQuantity),
-  packUnit: medicine.packUnit,
-  shortDescription: medicine.shortDescription,
-  imageUrl: medicine.imageUrl,
-  uses: medicine.uses,
-  recommendedAgeGroup: medicine.recommendedAgeGroup,
-  directions: medicine.directions,
-  warnings: medicine.warnings,
-  storageInstructions: medicine.storageInstructions,
-  barcode: medicine.barcode,
-  prescriptionRequired: medicine.prescriptionRequired,
-  manufacturer: medicine.manufacturer,
-  mr: medicine.mr,
-  active: medicine.active,
-  mrp: medicine.commercialDetails ? Number(medicine.commercialDetails.mrp) : null,
-  createdAt: medicine.createdAt,
-  updatedAt: medicine.updatedAt,
-});
+const toPublicMedicine = (medicine: MedicineRecord): PublicMedicine => {
+  const latestBatch = medicine.batches && medicine.batches.length > 0 ? medicine.batches[0] : null;
+  const commDetails = latestBatch?.commercialDetails || null;
+
+  return {
+    id: medicine.id,
+    name: medicine.name,
+    composition: medicine.composition,
+    form: medicine.form,
+    packQuantity: Number(medicine.packQuantity),
+    packUnit: medicine.packUnit,
+    shortDescription: medicine.shortDescription,
+    imageUrl: medicine.imageUrl,
+    uses: medicine.uses,
+    recommendedAgeGroup: medicine.recommendedAgeGroup,
+    directions: medicine.directions,
+    warnings: medicine.warnings,
+    storageInstructions: medicine.storageInstructions,
+    barcode: medicine.barcode,
+    prescriptionRequired: medicine.prescriptionRequired,
+    manufacturer: medicine.manufacturer,
+    mr: medicine.mr,
+    active: medicine.active,
+    mrp: commDetails ? Number(commDetails.mrp) : null,
+    createdAt: medicine.createdAt,
+    updatedAt: medicine.updatedAt,
+  };
+};
 
 const medicineNotFound = (): AppError =>
   new AppError(404, 'MEDICINE_NOT_FOUND', 'Medicine not found');
@@ -184,14 +212,11 @@ const referenceNotFound = (reference: string): AppError =>
 const inactiveReference = (reference: string): AppError =>
   new AppError(409, `INACTIVE_${reference.toUpperCase()}`, `${reference} must be active`);
 
-
 const getOrderBy = (
   sortBy: MedicineSortField = 'name',
   sortOrder: SortOrder = 'asc',
 ) => {
   switch (sortBy) {
-    case 'mrp':
-      return { commercialDetails: { mrp: sortOrder } };
     case 'packQuantity':
       return { packQuantity: sortOrder };
     case 'createdAt':
@@ -222,9 +247,13 @@ export const listMedicines = async (
       ...(input.mrId ? { mrId: input.mrId } : {}),
       ...(minPrice !== undefined || maxPrice !== undefined
         ? {
-            commercialDetails: {
-              ...(minPrice !== undefined ? { mrp: { gte: minPrice } } : {}),
-              ...(maxPrice !== undefined ? { mrp: { lte: maxPrice } } : {}),
+            batches: {
+              some: {
+                commercialDetails: {
+                  ...(minPrice !== undefined ? { mrp: { gte: minPrice } } : {}),
+                  ...(maxPrice !== undefined ? { mrp: { lte: maxPrice } } : {}),
+                },
+              },
             },
           }
         : {}),
@@ -232,7 +261,19 @@ export const listMedicines = async (
     include: medicineInclude,
     orderBy: getOrderBy(sortBy, sortOrder),
   });
-  return medicines.map(toPublicMedicine);
+
+  const publicList = medicines.map(toPublicMedicine);
+
+  if (sortBy === 'mrp') {
+    publicList.sort((a, b) => {
+      if (a.mrp === null && b.mrp === null) return 0;
+      if (a.mrp === null) return 1;
+      if (b.mrp === null) return -1;
+      return sortOrder === 'desc' ? b.mrp - a.mrp : a.mrp - b.mrp;
+    });
+  }
+
+  return publicList;
 };
 
 export const getMedicine = async (
@@ -526,28 +567,121 @@ export const createMedicine = async (
       throw error;
     }
 
-    if (input.commercialDetails && userId) {
-      await tx.commercialDetails.create({
-        data: {
-          medicineId: createdMedicine.id,
+    // Determine First Batch Information
+    let batchNumber: string | undefined;
+    let manufacturingDate: Date | null = null;
+    let expiryDate: Date | undefined;
+    let commData: {
+      purchaseRate: number;
+      mrp: number;
+      discountPercent: number;
+      scheme?: Prisma.InputJsonValue | null;
+      privateNotes?: string | null;
+    } | undefined;
+
+    if (input.firstBatch) {
+      batchNumber = input.firstBatch.batchNumber;
+      manufacturingDate = input.firstBatch.manufacturingDate ?? null;
+      expiryDate = input.firstBatch.expiryDate;
+      const fbComm = input.firstBatch.commercialDetails;
+      if (fbComm) {
+        commData = {
+          purchaseRate: fbComm.purchaseRate ?? 0,
+          mrp: fbComm.mrp,
+          discountPercent: fbComm.discountPercent ?? 0,
+          scheme: fbComm.scheme as Prisma.InputJsonValue,
+          privateNotes: fbComm.privateNotes,
+        };
+      } else if (input.firstBatch.mrp !== undefined) {
+        commData = {
+          purchaseRate: input.firstBatch.purchaseRate ?? 0,
+          mrp: input.firstBatch.mrp,
+          discountPercent: input.firstBatch.discountPercent ?? 0,
+          scheme: input.firstBatch.scheme as Prisma.InputJsonValue,
+          privateNotes: input.firstBatch.privateNotes,
+        };
+      }
+    } else if (input.batchNumber && input.expiryDate) {
+      batchNumber = input.batchNumber;
+      manufacturingDate = input.manufacturingDate ?? null;
+      expiryDate = input.expiryDate;
+      if (input.commercialDetails) {
+        commData = {
           purchaseRate: input.commercialDetails.purchaseRate ?? 0,
           mrp: input.commercialDetails.mrp,
           discountPercent: input.commercialDetails.discountPercent ?? 0,
-          scheme:
-            input.commercialDetails.scheme === undefined || input.commercialDetails.scheme === null
-              ? Prisma.DbNull
-              : (input.commercialDetails.scheme as Prisma.InputJsonValue),
-          privateNotes: input.commercialDetails.privateNotes ?? null,
-          updatedBy: userId,
+          scheme: input.commercialDetails.scheme as Prisma.InputJsonValue,
+          privateNotes: input.commercialDetails.privateNotes,
+        };
+      } else if (input.mrp !== undefined) {
+        commData = {
+          purchaseRate: input.purchaseRate ?? 0,
+          mrp: input.mrp,
+          discountPercent: input.discountPercent ?? 0,
+          scheme: input.scheme as Prisma.InputJsonValue,
+          privateNotes: input.privateNotes,
+        };
+      }
+    } else if (input.commercialDetails || input.mrp !== undefined) {
+      batchNumber = 'BATCH-001';
+      manufacturingDate = input.manufacturingDate ?? null;
+      expiryDate = input.expiryDate ?? new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000);
+      if (input.commercialDetails) {
+        commData = {
+          purchaseRate: input.commercialDetails.purchaseRate ?? 0,
+          mrp: input.commercialDetails.mrp,
+          discountPercent: input.commercialDetails.discountPercent ?? 0,
+          scheme: input.commercialDetails.scheme as Prisma.InputJsonValue,
+          privateNotes: input.commercialDetails.privateNotes,
+        };
+      } else {
+        commData = {
+          purchaseRate: input.purchaseRate ?? 0,
+          mrp: input.mrp!,
+          discountPercent: input.discountPercent ?? 0,
+          scheme: input.scheme as Prisma.InputJsonValue,
+          privateNotes: input.privateNotes,
+        };
+      }
+    }
+
+    if (batchNumber && expiryDate) {
+      if (manufacturingDate && expiryDate <= manufacturingDate) {
+        throw new AppError(400, 'INVALID_DATES', 'Expiry date must be after manufacturing date');
+      }
+
+      const createdBatch = await tx.batch.create({
+        data: {
+          medicineId: createdMedicine.id,
+          batchNumber,
+          manufacturingDate,
+          expiryDate,
         },
       });
 
-      const updatedWithCommercial = await tx.medicine.findUnique({
+      if (commData && userId) {
+        await tx.commercialDetails.create({
+          data: {
+            batchId: createdBatch.id,
+            purchaseRate: commData.purchaseRate ?? 0,
+            mrp: commData.mrp,
+            discountPercent: commData.discountPercent ?? 0,
+            scheme:
+              commData.scheme === undefined || commData.scheme === null
+                ? Prisma.DbNull
+                : (commData.scheme as Prisma.InputJsonValue),
+            privateNotes: commData.privateNotes ?? null,
+            updatedBy: userId,
+          },
+        });
+      }
+
+      const refreshed = await tx.medicine.findUnique({
         where: { id: createdMedicine.id },
         include: medicineInclude,
       });
-      if (updatedWithCommercial) {
-        createdMedicine = updatedWithCommercial as MedicineRecord;
+      if (refreshed) {
+        createdMedicine = refreshed as MedicineRecord;
       }
     }
 
@@ -646,49 +780,73 @@ export const updateMedicine = async (
       throw error;
     }
 
-    if (input.commercialDetails && userId) {
-      const existingCommercial = await tx.commercialDetails.findUnique({
-        where: { medicineId: id },
-      });
+    const commData = input.commercialDetails || (input.mrp !== undefined ? {
+      purchaseRate: input.purchaseRate,
+      mrp: input.mrp,
+      discountPercent: input.discountPercent,
+      scheme: input.scheme,
+      privateNotes: input.privateNotes,
+    } : undefined);
 
-      if (existingCommercial) {
-        await tx.commercialDetails.update({
-          where: { medicineId: id },
+    if (commData && userId) {
+      let latestBatch = await getLatestBatchForMedicine(id, tx as unknown as typeof prisma);
+      if (!latestBatch) {
+        latestBatch = await tx.batch.create({
           data: {
-            purchaseRate: input.commercialDetails.purchaseRate !== undefined
-              ? input.commercialDetails.purchaseRate
-              : existingCommercial.purchaseRate,
-            mrp: input.commercialDetails.mrp,
-            discountPercent: input.commercialDetails.discountPercent !== undefined
-              ? input.commercialDetails.discountPercent
-              : existingCommercial.discountPercent,
+            medicineId: id,
+            batchNumber: 'BATCH-001',
+            manufacturingDate: new Date(),
+            expiryDate: new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000),
+          },
+          include: {
+            medicine: { select: { id: true, name: true, active: true } },
+            commercialDetails: {
+              include: {
+                updatedByUser: { select: { id: true, name: true } },
+              },
+            },
+          },
+        });
+      }
+
+      if (latestBatch.commercialDetails) {
+        await tx.commercialDetails.update({
+          where: { batchId: latestBatch.id },
+          data: {
+            purchaseRate: commData.purchaseRate !== undefined
+              ? commData.purchaseRate
+              : latestBatch.commercialDetails.purchaseRate,
+            mrp: commData.mrp !== undefined ? commData.mrp : latestBatch.commercialDetails.mrp,
+            discountPercent: commData.discountPercent !== undefined
+              ? commData.discountPercent
+              : latestBatch.commercialDetails.discountPercent,
             scheme:
-              input.commercialDetails.scheme === undefined
-                ? (existingCommercial.scheme === null
+              commData.scheme === undefined
+                ? (latestBatch.commercialDetails.scheme === null
                   ? Prisma.DbNull
-                  : (existingCommercial.scheme as Prisma.InputJsonValue))
-                : input.commercialDetails.scheme === null
+                  : (latestBatch.commercialDetails.scheme as Prisma.InputJsonValue))
+                : commData.scheme === null
                 ? Prisma.DbNull
-                : (input.commercialDetails.scheme as Prisma.InputJsonValue),
+                : (commData.scheme as Prisma.InputJsonValue),
             privateNotes:
-              input.commercialDetails.privateNotes !== undefined
-                ? input.commercialDetails.privateNotes
-                : existingCommercial.privateNotes,
+              commData.privateNotes !== undefined
+                ? commData.privateNotes
+                : latestBatch.commercialDetails.privateNotes,
             updatedBy: userId,
           },
         });
-      } else {
+      } else if (commData.mrp !== undefined) {
         await tx.commercialDetails.create({
           data: {
-            medicineId: id,
-            purchaseRate: input.commercialDetails.purchaseRate ?? 0,
-            mrp: input.commercialDetails.mrp,
-            discountPercent: input.commercialDetails.discountPercent ?? 0,
+            batchId: latestBatch.id,
+            purchaseRate: commData.purchaseRate ?? 0,
+            mrp: commData.mrp,
+            discountPercent: commData.discountPercent ?? 0,
             scheme:
-              input.commercialDetails.scheme === undefined || input.commercialDetails.scheme === null
+              commData.scheme === undefined || commData.scheme === null
                 ? Prisma.DbNull
-                : (input.commercialDetails.scheme as Prisma.InputJsonValue),
-            privateNotes: input.commercialDetails.privateNotes ?? null,
+                : (commData.scheme as Prisma.InputJsonValue),
+            privateNotes: commData.privateNotes ?? null,
             updatedBy: userId,
           },
         });
@@ -723,11 +881,11 @@ export const deactivateMedicine = async (
   if (!existing) throw medicineNotFound();
   if (!existing.active) return toPublicMedicine(existing);
 
-  const result = toPublicMedicine(await db.medicine.update({
+  const result = toPublicMedicine((await db.medicine.update({
     where: { id },
     data: { active: false },
     include: medicineInclude,
-  }));
+  })) as MedicineRecord);
 
   if (existing.imageUrl) {
     await r2StorageService.deleteObjectByPublicUrl(existing.imageUrl);

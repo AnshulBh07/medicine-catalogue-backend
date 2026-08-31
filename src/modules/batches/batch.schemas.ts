@@ -27,12 +27,59 @@ const validateDateOrder = <T extends { manufacturingDate?: Date | null; expiryDa
   }
 };
 
+const hasMaxTwoDecimals = (value: number): boolean => {
+  const str = value.toString();
+  if (str.includes('e') || str.includes('E')) {
+    return Number(value.toFixed(2)) === value;
+  }
+  const parts = str.split('.');
+  return parts.length <= 1 || (parts[1] !== undefined && parts[1].length <= 2);
+};
+
+const money = z.coerce.number()
+  .finite()
+  .nonnegative()
+  .max(9999999999.99)
+  .refine(hasMaxTwoDecimals, {
+    message: 'Value must have at most 2 decimal places',
+  });
+
+const discountPercent = z.coerce.number()
+  .finite()
+  .min(0)
+  .max(100)
+  .refine(hasMaxTwoDecimals, {
+    message: 'Discount percent must have at most 2 decimal places',
+  });
+
+const jsonValue: z.ZodType<unknown> = z.lazy(() => z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  z.array(jsonValue),
+  z.record(z.string(), jsonValue),
+]));
+
+export const batchCommercialDetailsSchema = z.object({
+  purchaseRate: money.optional().default(0),
+  mrp: money,
+  discountPercent: discountPercent.optional().default(0),
+  scheme: jsonValue.nullable().optional(),
+  privateNotes: z.string().trim().max(100000).nullable().optional(),
+}).strict();
+
 export const createBatchSchema = z
   .object({
     medicineId: z.string().uuid(),
     batchNumber,
     manufacturingDate: dateOnly.nullable().optional(),
     expiryDate: dateOnly,
+    commercialDetails: batchCommercialDetailsSchema.optional(),
+    purchaseRate: money.optional(),
+    mrp: money.optional(),
+    discountPercent: discountPercent.optional(),
+    scheme: jsonValue.nullable().optional(),
+    privateNotes: z.string().trim().max(100000).nullable().optional(),
   })
   .strict()
   .superRefine(validateDateOrder);
@@ -42,6 +89,12 @@ export const updateBatchSchema = z
     batchNumber: batchNumber.optional(),
     manufacturingDate: dateOnly.nullable().optional(),
     expiryDate: dateOnly.optional(),
+    commercialDetails: batchCommercialDetailsSchema.partial().optional(),
+    purchaseRate: money.optional(),
+    mrp: money.optional(),
+    discountPercent: discountPercent.optional(),
+    scheme: jsonValue.nullable().optional(),
+    privateNotes: z.string().trim().max(100000).nullable().optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, {
@@ -55,6 +108,10 @@ export const updateBatchSchema = z
 
 export const batchIdSchema = z.object({
   id: z.string().uuid(),
+});
+
+export const batchParamIdSchema = z.object({
+  batchId: z.string().uuid(),
 });
 
 export const listBatchesSchema = z.object({

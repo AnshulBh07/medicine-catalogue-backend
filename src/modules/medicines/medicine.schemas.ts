@@ -47,6 +47,31 @@ const hasMaxThreeDecimals = (value: number): boolean => {
   return parts.length <= 1 || (parts[1] !== undefined && parts[1].length <= 3);
 };
 
+const dateOnly = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD format')
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year!, month! - 1, day!));
+    return date.getUTCFullYear() === year
+      && date.getUTCMonth() === month! - 1
+      && date.getUTCDate() === day;
+  }, 'Date is invalid')
+  .transform((value) => new Date(`${value}T00:00:00.000Z`));
+
+const validateDateOrder = <T extends { manufacturingDate?: Date | null; expiryDate?: Date }>(
+  value: T,
+  context: z.RefinementCtx,
+): void => {
+  if (value.manufacturingDate && value.expiryDate && value.expiryDate <= value.manufacturingDate) {
+    context.addIssue({
+      code: 'custom',
+      path: ['expiryDate'],
+      message: 'Expiry date must be after manufacturing date',
+    });
+  }
+};
+
 export const saltInputSchema = z
   .object({
     saltId: z.string().uuid().optional(),
@@ -73,6 +98,18 @@ export const commercialDetailsNestedSchema = z.object({
   scheme: jsonValue.nullable().optional(),
   privateNotes: optionalText(100000),
 }).strict();
+
+export const firstBatchNestedSchema = z.object({
+  batchNumber: z.string().trim().min(1).max(100),
+  manufacturingDate: dateOnly.nullable().optional(),
+  expiryDate: dateOnly,
+  purchaseRate: money.optional().default(0),
+  mrp: money.optional(),
+  discountPercent: discountPercent.optional().default(0),
+  scheme: jsonValue.nullable().optional(),
+  privateNotes: optionalText(100000),
+  commercialDetails: commercialDetailsNestedSchema.optional(),
+}).strict().superRefine(validateDateOrder);
 
 const validateDuplicateSalts = (
   salts: Array<z.infer<typeof saltInputSchema>> | undefined,
@@ -134,7 +171,16 @@ export const createMedicineSchema = z
     compositionId: z.string().uuid().optional(),
     salts: z.array(saltInputSchema).min(1).optional(),
     compositionSalts: z.array(saltInputSchema).min(1).optional(),
+    firstBatch: firstBatchNestedSchema.optional(),
+    batchNumber: z.string().trim().min(1).max(100).optional(),
+    manufacturingDate: dateOnly.nullable().optional(),
+    expiryDate: dateOnly.optional(),
     commercialDetails: commercialDetailsNestedSchema.optional(),
+    purchaseRate: money.optional(),
+    mrp: money.optional(),
+    discountPercent: discountPercent.optional(),
+    scheme: jsonValue.nullable().optional(),
+    privateNotes: optionalText(100000),
   })
   .strict()
   .superRefine((data, context) => {
@@ -158,6 +204,10 @@ export const createMedicineSchema = z
       });
     }
 
+    if (data.manufacturingDate && data.expiryDate) {
+      validateDateOrder(data as { manufacturingDate: Date; expiryDate: Date }, context);
+    }
+
     if (data.salts) validateDuplicateSalts(data.salts, context, 'salts');
     if (data.compositionSalts) validateDuplicateSalts(data.compositionSalts, context, 'compositionSalts');
   });
@@ -169,6 +219,11 @@ export const updateMedicineSchema = z
     salts: z.array(saltInputSchema).min(1).optional(),
     compositionSalts: z.array(saltInputSchema).min(1).optional(),
     commercialDetails: commercialDetailsNestedSchema.optional(),
+    purchaseRate: money.optional(),
+    mrp: money.optional(),
+    discountPercent: discountPercent.optional(),
+    scheme: jsonValue.nullable().optional(),
+    privateNotes: optionalText(100000),
     active: z.boolean().optional(),
   })
   .partial()

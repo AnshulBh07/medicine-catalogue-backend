@@ -7,7 +7,10 @@ import { compositionSaltsRouter } from '../modules/composition-salts/composition
 import { compositionsRouter } from '../modules/compositions/composition.routes.js';
 import { medicinesRouter } from '../modules/medicines/medicine.routes.js';
 import { batchesRouter } from '../modules/batches/batch.routes.js';
-import { commercialDetailsRouter } from '../modules/commercial-details/commercial-details.routes.js';
+import {
+  batchCommercialDetailsRouter,
+  commercialDetailsRouter,
+} from '../modules/commercial-details/commercial-details.routes.js';
 import { mrsRouter } from '../modules/mrs/mr.routes.js';
 import { manufacturersRouter } from '../modules/manufacturers/manufacturer.routes.js';
 import { uploadsRouter } from '../modules/uploads/upload.routes.js';
@@ -25,6 +28,7 @@ router.use('/composition-salts', compositionSaltsRouter);
 router.use('/compositions', compositionsRouter);
 router.use('/medicines', medicinesRouter);
 router.use('/batches', batchesRouter);
+router.use('/batches', batchCommercialDetailsRouter);
 router.use('/medicines', commercialDetailsRouter);
 router.use('/mrs', mrsRouter);
 router.use('/manufacturers', manufacturersRouter);

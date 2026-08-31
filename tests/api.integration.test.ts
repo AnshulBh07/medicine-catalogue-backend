@@ -1653,12 +1653,12 @@ describe('Manufacturer API', () => {
     // 4. Verify DB State: Medicine is soft-deleted, relations intact
     const dbMed = await prisma.medicine.findUnique({
       where: { id: targetId },
-      include: { batches: true, commercialDetails: true },
+      include: { batches: { include: { commercialDetails: true } } },
     });
     expect(dbMed).not.toBeNull();
     expect(dbMed?.active).toBe(false);
-    expect(dbMed?.batches.length).toBe(1);
-    expect(dbMed?.commercialDetails).not.toBeNull();
+    expect(dbMed?.batches.length).toBe(2);
+    expect(dbMed?.batches.some((b) => b.commercialDetails !== null)).toBe(true);
 
     // 5. Shared entities remain active and untouched
     const dbMfg = await prisma.manufacturer.findUnique({ where: { id: mfgId } });
