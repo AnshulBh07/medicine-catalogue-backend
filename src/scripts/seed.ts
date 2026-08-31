@@ -2,6 +2,7 @@ import argon2 from 'argon2';
 import { $Enums } from '@prisma/client/index';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
+import { seedAttendanceData } from './seed-attendance.js';
 
 export async function seedDatabase() {
   logger.info('Starting realistic Medicine Catalogue database seed...');
@@ -588,6 +589,9 @@ export async function seedDatabase() {
   }
 
   logger.info(`Successfully seeded ${medicinesData.length} realistic catalogue medicines!`);
+
+  // 8. Seed Attendance and Employee test data
+  await seedAttendanceData();
 }
 
 if (process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js')) {
