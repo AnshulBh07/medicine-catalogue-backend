@@ -300,7 +300,7 @@ describe('Daily Shortage Notebook Integration Tests', () => {
         .set('Authorization', `Bearer ${employeeToken}`)
         .send({
           medicineId: testMedicine1Id,
-          date: yesterdayDate,
+          date: testDate,
           quantity: 0,
         });
 
@@ -313,7 +313,7 @@ describe('Daily Shortage Notebook Integration Tests', () => {
         .set('Authorization', `Bearer ${employeeToken}`)
         .send({
           medicineId: '00000000-0000-0000-0000-000000000000',
-          date: yesterdayDate,
+          date: testDate,
           quantity: 10,
         });
 
@@ -321,7 +321,7 @@ describe('Daily Shortage Notebook Integration Tests', () => {
       expect(response.body.error.message).toContain('Medicine not found');
     });
 
-    it('9. allows the same medicine on a different date (historical date support)', async () => {
+    it('9. rejects creating shortage items for past dates with 400 PAST_DATE_NOT_ALLOWED', async () => {
       const response = await request(app)
         .post('/api/v1/shortages')
         .set('Authorization', `Bearer ${employeeToken}`)
@@ -331,8 +331,43 @@ describe('Daily Shortage Notebook Integration Tests', () => {
           quantity: 15,
         });
 
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe('PAST_DATE_NOT_ALLOWED');
+      expect(response.body.error.message).toContain('past dates');
+    });
+
+    it('9b. creates shortage item with minimum quantity 1 and custom unit STRIP', async () => {
+      // Create another medicine for this test
+      const med3 = await prisma.medicine.create({
+        data: {
+          name: `Azithromycin 500mg ${testSuffix}`,
+          compositionId: testCompositionId,
+          form: 'TABLET',
+          packQuantity: 3,
+          packUnit: 'TABLET',
+          manufacturerId: testManufacturerId,
+          prescriptionRequired: true,
+          active: true,
+        },
+      });
+
+      const response = await request(app)
+        .post('/api/v1/shortages')
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .send({
+          medicineId: med3.id,
+          date: testDate,
+          quantity: 1,
+          unit: 'STRIP',
+        });
+
       expect(response.status).toBe(201);
-      expect(response.body.shortageItem.date).toBe(yesterdayDate);
+      expect(response.body.shortageItem.quantity).toBe(1);
+      expect(response.body.shortageItem.unit).toBe('STRIP');
+
+      // Cleanup
+      await prisma.shortageItem.deleteMany({ where: { medicineId: med3.id } });
+      await prisma.medicine.delete({ where: { id: med3.id } });
     });
   });
 

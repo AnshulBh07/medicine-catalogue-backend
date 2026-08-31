@@ -23,7 +23,16 @@ export const manufacturerIdSchema = z.object({
 
 export const listManufacturersSchema = z.object({
   search: z.string().trim().optional(),
-  includeInactive: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  includeInactive: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true')
+    .optional(),
+  active: z.enum(['active', 'inactive', 'all']).optional(),
+  hasMedicines: z.enum(['true', 'false', 'all']).optional(),
+  sortBy: z
+    .enum(['name_asc', 'name_desc', 'newest', 'oldest', 'medicines_high', 'medicines_low'])
+    .optional(),
 });
 
 export type CreateManufacturerInput = z.infer<typeof createManufacturerSchema>;

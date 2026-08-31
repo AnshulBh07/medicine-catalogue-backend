@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { AppError } from '../../common/errors/app-error.js';
-import type { ShortageStatus, Prisma } from '@prisma/client';
+import type { ShortageStatus, ShortageUnit, Prisma } from '@prisma/client';
 import type {
   CreateShortageItemInput,
   PatchShortageItemInput,
@@ -27,6 +27,7 @@ export interface FormattedShortageItem {
   medicineId: string;
   date: string;
   quantity: number;
+  unit: ShortageUnit;
   status: ShortageStatus;
   note: string | null;
   createdById: string | null;
@@ -99,6 +100,7 @@ function formatShortageItem(
     medicineId: item.medicineId,
     date: dateStr,
     quantity: item.quantity,
+    unit: item.unit,
     status: item.status,
     note: item.note,
     createdById: item.createdById,
@@ -268,6 +270,16 @@ export const shortageService = {
     input: CreateShortageItemInput,
   ): Promise<FormattedShortageItem> {
     const targetDateStr = input.date || getUtcDateString();
+    const todayStr = getUtcDateString();
+
+    if (targetDateStr < todayStr) {
+      throw new AppError(
+        400,
+        'PAST_DATE_NOT_ALLOWED',
+        'Cannot add shortage items for past dates',
+      );
+    }
+
     const targetDate = parseDateToUtc(targetDateStr);
 
     // Verify medicine exists and is active
@@ -311,6 +323,7 @@ export const shortageService = {
         medicineId: input.medicineId,
         date: targetDate,
         quantity: input.quantity,
+        unit: (input.unit as ShortageUnit) || 'PACK',
         note: input.note ? input.note.trim() : null,
         status: (input.status as ShortageStatus) || 'PENDING',
         createdById: userId,
@@ -353,6 +366,10 @@ export const shortageService = {
 
     if (input.quantity !== undefined) {
       updateData.quantity = input.quantity;
+    }
+
+    if (input.unit !== undefined) {
+      updateData.unit = input.unit as ShortageUnit;
     }
 
     if (input.status !== undefined) {

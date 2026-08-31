@@ -245,11 +245,21 @@ model AttendanceRecord {
   @@index([userId, date])
 }
 
+enum ShortageUnit {
+  PACK
+  STRIP
+  BOX
+  PIECE
+  BOTTLE
+  CRATE
+}
+
 model ShortageItem {
   id          String         @id @default(uuid()) @db.Uuid
   medicineId  String         @db.Uuid
   date        DateTime       @db.Date
   quantity    Int
+  unit        ShortageUnit   @default(PACK)
   status      ShortageStatus @default(PENDING)
   note        String?        @db.Text
   createdById String?        @db.Uuid

@@ -3,6 +3,7 @@ import { AppError } from '../../common/errors/app-error.js';
 import {
   createManufacturer,
   deactivateManufacturer,
+  deleteManufacturer,
   getManufacturer,
   listManufacturers,
   updateManufacturer,
@@ -39,7 +40,17 @@ export const updateManufacturerController: RequestHandler = async (request, resp
   response.status(200).json({ manufacturer });
 };
 
-export const deactivateManufacturerController: RequestHandler = async (request, response) => {
+export const deleteManufacturerController: RequestHandler = async (request, response) => {
+  const permanent = request.query.permanent === 'true';
+  if (permanent) {
+    const result = await deleteManufacturer(request.params.id as string);
+    response.status(200).json(result);
+    return;
+  }
   const manufacturer = await deactivateManufacturer(request.params.id as string);
   response.status(200).json({ manufacturer });
+};
+
+export const deactivateManufacturerController: RequestHandler = async (request, response, next) => {
+  return deleteManufacturerController(request, response, next);
 };

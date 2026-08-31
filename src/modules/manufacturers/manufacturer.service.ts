@@ -10,33 +10,48 @@ import type {
 export type PublicManufacturer = Pick<
   Manufacturer,
   'id' | 'name' | 'active' | 'createdAt' | 'updatedAt'
->;
-
-type SearchFilter = {
-  contains: string;
-  mode: 'insensitive';
+> & {
+  medicinesCount?: number;
+  medicines?: Array<{
+    id: string;
+    name: string;
+    form: string;
+    packQuantity: number;
+    packUnit: string;
+    active: boolean;
+    composition?: {
+      id: string;
+      displayText: string;
+    } | null;
+  }>;
 };
 
-export interface ManufacturerStore {
-  manufacturer: {
-    findMany(args: {
-      where: { active?: boolean; name?: SearchFilter };
-      orderBy: { name: 'asc' };
-    }): PromiseLike<Manufacturer[]>;
-    findFirst(args: { where: { name: { equals: string; mode: 'insensitive' } } }): PromiseLike<Manufacturer | null>;
-    findUnique(args: { where: { id: string } }): PromiseLike<Manufacturer | null>;
-    create(args: { data: { name: string; active: true } }): PromiseLike<Manufacturer>;
-    update(args: {
-      where: { id: string };
-      data: Partial<{ name: string; active: boolean }>;
-    }): PromiseLike<Manufacturer>;
-  };
-}
-
-const toPublicManufacturer = (manufacturer: Manufacturer): PublicManufacturer => ({
+const toPublicManufacturer = (
+  manufacturer: Manufacturer & {
+    _count?: { medicines: number };
+    medicines?: Array<{
+      id: string;
+      name: string;
+      form: string;
+      packQuantity: number | Prisma.Decimal;
+      packUnit: string;
+      active: boolean;
+      composition?: { id: string; displayText: string } | null;
+    }>;
+  },
+): PublicManufacturer => ({
   id: manufacturer.id,
   name: manufacturer.name,
   active: manufacturer.active,
+  medicinesCount: manufacturer._count?.medicines ?? manufacturer.medicines?.length ?? 0,
+  ...(manufacturer.medicines
+    ? {
+        medicines: manufacturer.medicines.map((m) => ({
+          ...m,
+          packQuantity: Number(m.packQuantity),
+        })),
+      }
+    : {}),
   createdAt: manufacturer.createdAt,
   updatedAt: manufacturer.updatedAt,
 });
@@ -49,7 +64,7 @@ const duplicateManufacturer = (): AppError =>
 
 const ensureUniqueName = async (
   name: string,
-  db: ManufacturerStore,
+  db: typeof prisma | Prisma.TransactionClient = prisma,
   id?: string,
 ): Promise<void> => {
   const existing = await db.manufacturer.findFirst({
@@ -60,37 +75,110 @@ const ensureUniqueName = async (
 
 export const listManufacturers = async (
   input: ListManufacturersInput,
-  db: ManufacturerStore = prisma,
+  db: typeof prisma = prisma,
 ): Promise<PublicManufacturer[]> => {
+  const where: Prisma.ManufacturerWhereInput = {
+    ...(input.active === 'active'
+      ? { active: true }
+      : input.active === 'inactive'
+        ? { active: false }
+        : input.includeInactive || input.active === 'all'
+          ? {}
+          : { active: true }),
+    ...(input.search?.trim()
+      ? { name: { contains: input.search.trim(), mode: 'insensitive' } }
+      : {}),
+  };
+
   const manufacturers = await db.manufacturer.findMany({
-    where: {
-      ...(input.includeInactive ? {} : { active: true }),
-      ...(input.search ? { name: { contains: input.search, mode: 'insensitive' } } : {}),
+    where,
+    include: {
+      _count: {
+        select: { medicines: true },
+      },
     },
     orderBy: { name: 'asc' },
   });
-  return manufacturers.map(toPublicManufacturer);
+
+  let filtered = manufacturers;
+  if (input.hasMedicines === 'true') {
+    filtered = filtered.filter((m) => m._count.medicines > 0);
+  } else if (input.hasMedicines === 'false') {
+    filtered = filtered.filter((m) => m._count.medicines === 0);
+  }
+
+  const sortBy = input.sortBy || 'name_asc';
+  filtered.sort((a, b) => {
+    switch (sortBy) {
+      case 'name_desc':
+        return b.name.localeCompare(a.name);
+      case 'newest':
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case 'oldest':
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      case 'medicines_high':
+        return (b._count?.medicines ?? 0) - (a._count?.medicines ?? 0) || a.name.localeCompare(b.name);
+      case 'medicines_low':
+        return (a._count?.medicines ?? 0) - (b._count?.medicines ?? 0) || a.name.localeCompare(b.name);
+      case 'name_asc':
+      default:
+        return a.name.localeCompare(b.name);
+    }
+  });
+
+  return filtered.map(toPublicManufacturer);
 };
 
 export const getManufacturer = async (
   id: string,
   includeInactive: boolean,
-  db: ManufacturerStore = prisma,
+  db: typeof prisma = prisma,
 ): Promise<PublicManufacturer> => {
-  const manufacturer = await db.manufacturer.findUnique({ where: { id } });
+  const manufacturer = await db.manufacturer.findUnique({
+    where: { id },
+    include: {
+      _count: {
+        select: { medicines: true },
+      },
+      medicines: {
+        select: {
+          id: true,
+          name: true,
+          form: true,
+          packQuantity: true,
+          packUnit: true,
+          active: true,
+          composition: {
+            select: {
+              id: true,
+              displayText: true,
+            },
+          },
+        },
+        orderBy: { name: 'asc' },
+      },
+    },
+  });
   if (!manufacturer || (!includeInactive && !manufacturer.active)) throw manufacturerNotFound();
   return toPublicManufacturer(manufacturer);
 };
 
 export const createManufacturer = async (
   input: CreateManufacturerInput,
-  db: ManufacturerStore = prisma,
+  db: typeof prisma = prisma,
 ): Promise<PublicManufacturer> => {
   await ensureUniqueName(input.name, db);
   try {
-    return toPublicManufacturer(await db.manufacturer.create({
+    const created = await db.manufacturer.create({
       data: { name: input.name, active: true },
-    }));
+    });
+    return {
+      id: created.id,
+      name: created.name,
+      active: created.active,
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+    };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw duplicateManufacturer();
@@ -102,14 +190,21 @@ export const createManufacturer = async (
 export const updateManufacturer = async (
   id: string,
   input: UpdateManufacturerInput,
-  db: ManufacturerStore = prisma,
+  db: typeof prisma = prisma,
 ): Promise<PublicManufacturer> => {
   const existing = await db.manufacturer.findUnique({ where: { id } });
   if (!existing) throw manufacturerNotFound();
   if (input.name !== undefined) await ensureUniqueName(input.name, db, id);
 
   try {
-    return toPublicManufacturer(await db.manufacturer.update({ where: { id }, data: input }));
+    const updated = await db.manufacturer.update({ where: { id }, data: input });
+    return {
+      id: updated.id,
+      name: updated.name,
+      active: updated.active,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw duplicateManufacturer();
@@ -118,15 +213,56 @@ export const updateManufacturer = async (
   }
 };
 
+export const deleteManufacturer = async (
+  id: string,
+  db: typeof prisma = prisma,
+): Promise<{ success: true; deletedManufacturerId: string; name: string }> => {
+  const existing = await db.manufacturer.findUnique({
+    where: { id },
+    include: {
+      _count: {
+        select: { medicines: true },
+      },
+    },
+  });
+  if (!existing) throw manufacturerNotFound();
+
+  const count = existing._count?.medicines ?? 0;
+  if (count > 0) {
+    throw new AppError(
+      409,
+      'MANUFACTURER_IN_USE',
+      `This manufacturer cannot be deleted because it is associated with ${count} medicine(s). Deactivate the manufacturer instead to preserve catalogue records.`,
+      { medicineCount: count },
+    );
+  }
+
+  await db.manufacturer.delete({ where: { id } });
+  return {
+    success: true,
+    deletedManufacturerId: id,
+    name: existing.name,
+  };
+};
+
 export const deactivateManufacturer = async (
   id: string,
-  db: ManufacturerStore = prisma,
+  db: typeof prisma = prisma,
 ): Promise<PublicManufacturer> => {
   const existing = await db.manufacturer.findUnique({ where: { id } });
   if (!existing) throw manufacturerNotFound();
   if (!existing.active) return toPublicManufacturer(existing);
-  return toPublicManufacturer(await db.manufacturer.update({
-    where: { id },
-    data: { active: false },
-  }));
+  return toPublicManufacturer(
+    await db.manufacturer.update({
+      where: { id },
+      data: { active: false },
+    }),
+  );
+};
+
+export const reactivateManufacturer = async (
+  id: string,
+  db: typeof prisma = prisma,
+): Promise<PublicManufacturer> => {
+  return updateManufacturer(id, { active: true }, db);
 };
