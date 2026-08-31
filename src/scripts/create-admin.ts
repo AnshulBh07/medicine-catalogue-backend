@@ -2,7 +2,6 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { $Enums } from '@prisma/client/index';
 import { AppError } from '../common/errors/app-error.js';
-import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { createUser } from '../modules/users/user.service.js';
@@ -55,16 +54,12 @@ const getCredentials = async (): Promise<AdminCredentials> => {
 };
 
 const main = async (): Promise<void> => {
-  if (env.NODE_ENV !== 'development') {
-    throw new AppError(403, 'DEVELOPMENT_ONLY', 'The create-admin command is development-only');
-  }
-
   const existingAdminCount = await prisma.user.count({
     where: { role: $Enums.UserRole.ADMIN },
   });
 
   if (existingAdminCount > 0) {
-    throw new AppError(409, 'ADMIN_ALREADY_EXISTS', 'An ADMIN account already exists');
+    throw new AppError(409, 'ADMIN_ALREADY_EXISTS', 'An ADMIN account already exists in the database');
   }
 
   const credentials = await getCredentials();
@@ -78,7 +73,7 @@ const main = async (): Promise<void> => {
   }
 
   await createUser(parsed.data);
-  logger.info('Initial ADMIN account created');
+  logger.info('Initial ADMIN account created successfully');
 };
 
 main()

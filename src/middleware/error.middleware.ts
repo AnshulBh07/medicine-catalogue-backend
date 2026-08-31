@@ -28,7 +28,26 @@ export const errorMiddleware: ErrorRequestHandler = (error, _request, response, 
     return;
   }
 
+  // Handle malformed JSON body from express.json()
+  if (
+    error instanceof SyntaxError &&
+    'status' in error &&
+    (error as { status?: number }).status === 400 &&
+    'body' in error
+  ) {
+    response.status(400).json({
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Malformed JSON payload in request body',
+      },
+    });
+    return;
+  }
+
+  // Centralized server-side error logging with error details
   logger.error({ err: error }, 'Unhandled request error');
+
+  // Client response contains only safe, generic information
   response.status(500).json({
     error: {
       code: 'INTERNAL_SERVER_ERROR',

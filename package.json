@@ -4,6 +4,9 @@
   "private": true,
   "description": "Backend API for the Medicine Catalogue project",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "nodemon --exec tsx src/server.ts",
     "build": "tsc",
@@ -16,7 +19,8 @@
     "seed": "tsx src/scripts/seed.ts",
     "seed:attendance": "tsx src/scripts/seed-attendance.ts",
     "prisma:generate": "prisma generate",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "prisma:migrate:prod": "node --env-file-if-exists=.env.production ./node_modules/prisma/build/index.js migrate deploy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1121.0",

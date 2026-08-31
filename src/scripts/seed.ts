@@ -1,10 +1,15 @@
 import argon2 from 'argon2';
 import { $Enums } from '@prisma/client/index';
+import { env } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { seedAttendanceData } from './seed-attendance.js';
 
 export async function seedDatabase() {
+  if (env.NODE_ENV === 'production' && process.env.ALLOW_PRODUCTION_SEED !== 'true') {
+    throw new Error('Database seeding is forbidden in production unless ALLOW_PRODUCTION_SEED=true is explicitly set.');
+  }
+
   logger.info('Starting realistic Medicine Catalogue database seed...');
 
   // 1. Ensure Admin User exists for CommercialDetails relation

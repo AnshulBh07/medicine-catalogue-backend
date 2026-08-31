@@ -9,6 +9,10 @@ import { router } from './routes/index.js';
 
 export const app = express();
 
+// Configure Express for running behind Nginx reverse proxy
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
 const getRequestUrl = (request: { originalUrl?: string; url?: string }): string =>
   request.originalUrl ?? request.url ?? '';
 
@@ -51,6 +55,12 @@ app.use(
       `${request.method} ${getRequestUrl(request)} ${response.statusCode} ${error.message}`,
   }),
 );
+
+// Lightweight root health endpoint (liveness probe)
+app.get('/health', (_request, response) => {
+  response.status(200).json({ status: 'ok' });
+});
+
 app.use('/api/v1', router);
 app.use(notFoundMiddleware);
 app.use(errorMiddleware);

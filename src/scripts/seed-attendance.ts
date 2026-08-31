@@ -1,5 +1,6 @@
 import argon2 from 'argon2';
 import { $Enums } from '@prisma/client/index';
+import { env } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -86,6 +87,10 @@ export async function seedAttendanceData(): Promise<{
     previousExceptionsCount: number;
   }>;
 }> {
+  if (env.NODE_ENV === 'production' && process.env.ALLOW_PRODUCTION_SEED !== 'true') {
+    throw new Error('Attendance seeding is forbidden in production unless ALLOW_PRODUCTION_SEED=true is explicitly set.');
+  }
+
   logger.info('===============================================================');
   logger.info('Starting Idempotent Attendance & Employee Development Seed...');
   logger.info('===============================================================');

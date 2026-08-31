@@ -6,8 +6,9 @@ import { prisma } from './lib/prisma.js';
 const startServer = async (): Promise<void> => {
   await prisma.$connect();
 
-  const server = app.listen(env.PORT, () => {
-    logger.info(`Medicine Catalogue API started on port ${env.PORT}`);
+  const host = env.HOST;
+  const server = app.listen(env.PORT, host, () => {
+    logger.info(`Medicine Catalogue API started on ${host}:${env.PORT} (${env.NODE_ENV})`);
   });
 
   let shuttingDown = false;
@@ -17,7 +18,14 @@ const startServer = async (): Promise<void> => {
     }
 
     shuttingDown = true;
-    logger.info(`Received ${signal}; shutting down`);
+    logger.info(`Received ${signal}; shutting down gracefully`);
+
+    // Force terminate if cleanup hangs longer than 10 seconds
+    const forceExitTimeout = setTimeout(() => {
+      logger.error('Graceful shutdown timed out after 10s; forcing exit');
+      process.exit(1);
+    }, 10000);
+    forceExitTimeout.unref();
 
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
@@ -47,8 +55,18 @@ const startServer = async (): Promise<void> => {
   }
 };
 
+process.on('uncaughtException', (error) => {
+  logger.fatal({ err: error }, 'Uncaught exception occurred; terminating process');
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.fatal({ err: reason }, 'Unhandled promise rejection occurred; terminating process');
+  process.exit(1);
+});
+
 startServer().catch(async (error: unknown) => {
   logger.error({ err: error }, 'Failed to start Medicine Catalogue API');
-  await prisma.$disconnect();
+  await prisma.$disconnect().catch(() => {});
   process.exitCode = 1;
 });
