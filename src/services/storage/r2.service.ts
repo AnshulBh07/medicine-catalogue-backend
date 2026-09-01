@@ -63,12 +63,55 @@ export class R2StorageService {
 
   private getConfig(): R2StorageConfig {
     return {
-      accountId: this.configOverride?.accountId ?? env.R2_ACCOUNT_ID,
-      accessKeyId: this.configOverride?.accessKeyId ?? env.R2_ACCESS_KEY_ID,
-      secretAccessKey: this.configOverride?.secretAccessKey ?? env.R2_SECRET_ACCESS_KEY,
-      bucketName: this.configOverride?.bucketName ?? env.R2_BUCKET_NAME,
-      endpoint: this.configOverride?.endpoint ?? env.R2_ENDPOINT,
-      publicUrl: this.configOverride?.publicUrl ?? env.R2_PUBLIC_URL,
+      accountId:
+        this.configOverride?.accountId ??
+        env.R2_ACCOUNT_ID ??
+        process.env.R2_ACCOUNT_ID ??
+        process.env.CLOUDFLARE_ACCOUNT_ID ??
+        process.env.CF_ACCOUNT_ID ??
+        process.env.ACCOUNT_ID,
+      accessKeyId:
+        this.configOverride?.accessKeyId ??
+        env.R2_ACCESS_KEY_ID ??
+        process.env.R2_ACCESS_KEY_ID ??
+        process.env.CLOUDFLARE_ACCESS_KEY_ID ??
+        process.env.AWS_ACCESS_KEY_ID ??
+        process.env.CF_ACCESS_KEY_ID ??
+        process.env.R2_ACCESS_KEY,
+      secretAccessKey:
+        this.configOverride?.secretAccessKey ??
+        env.R2_SECRET_ACCESS_KEY ??
+        process.env.R2_SECRET_ACCESS_KEY ??
+        process.env.CLOUDFLARE_SECRET_ACCESS_KEY ??
+        process.env.AWS_SECRET_ACCESS_KEY ??
+        process.env.CF_SECRET_ACCESS_KEY ??
+        process.env.R2_SECRET_KEY,
+      bucketName:
+        this.configOverride?.bucketName ??
+        env.R2_BUCKET_NAME ??
+        process.env.R2_BUCKET_NAME ??
+        process.env.CLOUDFLARE_BUCKET_NAME ??
+        process.env.CF_BUCKET_NAME ??
+        process.env.R2_BUCKET ??
+        process.env.BUCKET_NAME,
+      endpoint:
+        this.configOverride?.endpoint ??
+        env.R2_ENDPOINT ??
+        process.env.R2_ENDPOINT ??
+        process.env.CLOUDFLARE_ENDPOINT ??
+        process.env.CF_ENDPOINT ??
+        process.env.R2_S3_ENDPOINT,
+      publicUrl:
+        this.configOverride?.publicUrl ??
+        env.R2_PUBLIC_URL ??
+        process.env.R2_PUBLIC_URL ??
+        process.env.CLOUDFLARE_PUBLIC_URL ??
+        process.env.CF_PUBLIC_URL ??
+        process.env.R2_CUSTOM_DOMAIN ??
+        process.env.R2_PUBLIC_DOMAIN ??
+        process.env.IMAGE_BASE_URL ??
+        process.env.PUBLIC_IMAGE_URL ??
+        process.env.PUBLIC_URL,
     };
   }
 

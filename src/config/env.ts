@@ -12,12 +12,16 @@ const requestedEnvironment =
       : 'development';
 
 if (requestedEnvironment !== 'test') {
-  dotenv.config({
-    path: path.join(serverRoot, `.env.${requestedEnvironment}`),
-  });
-  dotenv.config({
-    path: path.join(serverRoot, '.env'),
-  });
+  // Load from both serverRoot and process.cwd() to support various execution contexts (systemd, workspace root, server dir)
+  const envPaths = [
+    path.join(serverRoot, `.env.${requestedEnvironment}`),
+    path.join(serverRoot, '.env'),
+    path.join(process.cwd(), `.env.${requestedEnvironment}`),
+    path.join(process.cwd(), '.env'),
+  ];
+  for (const envPath of envPaths) {
+    dotenv.config({ path: envPath });
+  }
 }
 
 const defaultDevCorsOrigins = 'http://localhost:8081,http://127.0.0.1:8081';
@@ -69,12 +73,43 @@ export const parseEnvironment = (raw: Record<string, unknown> = process.env) => 
     JWT_SECRET: raw.JWT_SECRET,
     JWT_EXPIRES_IN: raw.JWT_EXPIRES_IN,
     CORS_ORIGINS: raw.CORS_ORIGINS ?? raw.CORS_ORIGIN,
-    R2_ACCOUNT_ID: raw.R2_ACCOUNT_ID ?? raw.CLOUDFLARE_ACCOUNT_ID,
-    R2_ACCESS_KEY_ID: raw.R2_ACCESS_KEY_ID ?? raw.CLOUDFLARE_ACCESS_KEY_ID,
-    R2_SECRET_ACCESS_KEY: raw.R2_SECRET_ACCESS_KEY ?? raw.CLOUDFLARE_SECRET_ACCESS_KEY,
-    R2_BUCKET_NAME: raw.R2_BUCKET_NAME ?? raw.CLOUDFLARE_BUCKET_NAME,
-    R2_ENDPOINT: raw.R2_ENDPOINT ?? raw.CLOUDFLARE_ENDPOINT,
-    R2_PUBLIC_URL: raw.R2_PUBLIC_URL,
+    R2_ACCOUNT_ID:
+      raw.R2_ACCOUNT_ID ??
+      raw.CLOUDFLARE_ACCOUNT_ID ??
+      raw.CF_ACCOUNT_ID ??
+      raw.ACCOUNT_ID,
+    R2_ACCESS_KEY_ID:
+      raw.R2_ACCESS_KEY_ID ??
+      raw.CLOUDFLARE_ACCESS_KEY_ID ??
+      raw.AWS_ACCESS_KEY_ID ??
+      raw.CF_ACCESS_KEY_ID ??
+      raw.R2_ACCESS_KEY,
+    R2_SECRET_ACCESS_KEY:
+      raw.R2_SECRET_ACCESS_KEY ??
+      raw.CLOUDFLARE_SECRET_ACCESS_KEY ??
+      raw.AWS_SECRET_ACCESS_KEY ??
+      raw.CF_SECRET_ACCESS_KEY ??
+      raw.R2_SECRET_KEY,
+    R2_BUCKET_NAME:
+      raw.R2_BUCKET_NAME ??
+      raw.CLOUDFLARE_BUCKET_NAME ??
+      raw.CF_BUCKET_NAME ??
+      raw.R2_BUCKET ??
+      raw.BUCKET_NAME,
+    R2_ENDPOINT:
+      raw.R2_ENDPOINT ??
+      raw.CLOUDFLARE_ENDPOINT ??
+      raw.CF_ENDPOINT ??
+      raw.R2_S3_ENDPOINT,
+    R2_PUBLIC_URL:
+      raw.R2_PUBLIC_URL ??
+      raw.CLOUDFLARE_PUBLIC_URL ??
+      raw.CF_PUBLIC_URL ??
+      raw.R2_CUSTOM_DOMAIN ??
+      raw.R2_PUBLIC_DOMAIN ??
+      raw.IMAGE_BASE_URL ??
+      raw.PUBLIC_IMAGE_URL ??
+      raw.PUBLIC_URL,
   };
 
   const parsed = environmentSchema.safeParse(payload);

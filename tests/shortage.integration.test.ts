@@ -18,8 +18,10 @@ describe('Daily Shortage Notebook Integration Tests', () => {
   let testMedicine2Id: string;
 
   const testSuffix = Date.now().toString();
-  const testDate = '2026-08-31';
-  const yesterdayDate = '2026-08-30';
+  const todayObj = new Date();
+  const testDate = todayObj.toISOString().slice(0, 10);
+  const yesterdayObj = new Date(Date.now() - 86400000);
+  const yesterdayDate = yesterdayObj.toISOString().slice(0, 10);
 
   beforeAll(async () => {
     const passwordHash = await argon2.hash('TestPassword123');
@@ -145,7 +147,17 @@ describe('Daily Shortage Notebook Integration Tests', () => {
   });
 
   afterAll(async () => {
-    // Cleanup shortage items
+    // Cleanup shortage items and medicines linked to test
+    if (testCompositionId) {
+      await prisma.shortageItem.deleteMany({
+        where: {
+          medicine: { compositionId: testCompositionId },
+        },
+      });
+      await prisma.medicine.deleteMany({
+        where: { compositionId: testCompositionId },
+      });
+    }
     if (testMedicine1Id || testMedicine2Id) {
       const medIds = [testMedicine1Id, testMedicine2Id].filter(Boolean);
       await prisma.shortageItem.deleteMany({
@@ -153,8 +165,6 @@ describe('Daily Shortage Notebook Integration Tests', () => {
           medicineId: { in: medIds },
         },
       });
-
-      // Cleanup medicines
       await prisma.medicine.deleteMany({
         where: { id: { in: medIds } },
       });

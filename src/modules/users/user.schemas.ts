@@ -15,7 +15,7 @@ export const listUsersSchema = z.object({
     .optional(),
   page: z.coerce.number().int().positive().default(1).optional(),
   limit: z.coerce.number().int().positive().max(100).default(50).optional(),
-  sortBy: z.enum(['name', 'email', 'role', 'createdAt', 'updatedAt']).default('name').optional(),
+  sortBy: z.enum(['name', 'email', 'role', 'createdAt', 'updatedAt', 'monthlySalary']).default('name').optional(),
   sortOrder: z.enum(['asc', 'desc']).default('asc').optional(),
 });
 

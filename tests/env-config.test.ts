@@ -92,4 +92,23 @@ describe('Environment Configuration & Validation', () => {
     expect(parsed.R2_ENDPOINT).toBe('https://cf-acc-123.r2.cloudflarestorage.com');
     expect(parsed.R2_PUBLIC_URL).toBe('https://images.example.com');
   });
+
+  it('supports AWS and alternative R2 aliases for S3-compatible environments', () => {
+    const raw = {
+      ...validBaseEnv,
+      CF_ACCOUNT_ID: 'cf-alt-acc',
+      AWS_ACCESS_KEY_ID: 'aws-key-123',
+      AWS_SECRET_ACCESS_KEY: 'aws-secret-123',
+      R2_BUCKET: 'alt-bucket',
+      CF_ENDPOINT: 'https://cf-alt-acc.r2.cloudflarestorage.com',
+      R2_CUSTOM_DOMAIN: 'https://cdn.example.com',
+    };
+    const parsed = parseEnvironment(raw);
+    expect(parsed.R2_ACCOUNT_ID).toBe('cf-alt-acc');
+    expect(parsed.R2_ACCESS_KEY_ID).toBe('aws-key-123');
+    expect(parsed.R2_SECRET_ACCESS_KEY).toBe('aws-secret-123');
+    expect(parsed.R2_BUCKET_NAME).toBe('alt-bucket');
+    expect(parsed.R2_ENDPOINT).toBe('https://cf-alt-acc.r2.cloudflarestorage.com');
+    expect(parsed.R2_PUBLIC_URL).toBe('https://cdn.example.com');
+  });
 });
