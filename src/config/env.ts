@@ -42,7 +42,7 @@ export const environmentSchema = z
     JWT_EXPIRES_IN: z
       .string()
       .min(1, 'JWT_EXPIRES_IN is required')
-      .default('15m'),
+      .default('7d'),
     CORS_ORIGINS: z
       .string()
       .default(requestedEnvironment === 'production' ? '' : defaultDevCorsOrigins)
