@@ -182,7 +182,7 @@ export function calculateCommercialMetrics(
     freeQuantity,
     sellableQuantity,
     formattedSellingPrice: `₹${maxPrice.toFixed(2)}`,
-    formattedProfit: `₹${profit.toFixed(2)}`,
+    formattedProfit: `₹${profitPerUnit.toFixed(2)}`,
     formattedMargin: `${marginPercent.toFixed(2)}%`,
     formattedEffectivePurchaseRate: `₹${effectivePurchaseRate.toFixed(2)}`,
   };
