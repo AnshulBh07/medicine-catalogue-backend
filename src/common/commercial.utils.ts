@@ -2,18 +2,34 @@ export function formatScheme(scheme: unknown): string {
   if (!scheme) return 'None';
   if (typeof scheme === 'string') {
     const trimmed = scheme.trim();
-    return trimmed || 'None';
+    if (!trimmed) return 'None';
+    // If it's a JSON string representing an object (e.g. '{"description":"10+3"}')
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return formatScheme(parsed);
+      } catch {
+        // Not valid JSON, proceed with string formatting
+      }
+    }
+    return trimmed;
   }
   if (typeof scheme === 'object') {
     const obj = scheme as Record<string, unknown>;
+    if (typeof obj.description === 'string' && obj.description.trim()) {
+      return formatScheme(obj.description.trim());
+    }
     if (typeof obj.text === 'string' && obj.text.trim()) {
-      return obj.text.trim();
+      return formatScheme(obj.text.trim());
     }
     if (typeof obj.scheme === 'string' && obj.scheme.trim()) {
-      return obj.scheme.trim();
+      return formatScheme(obj.scheme.trim());
+    }
+    if (typeof obj.value === 'string' && obj.value.trim()) {
+      return formatScheme(obj.value.trim());
     }
     if (obj.buy !== undefined && obj.free !== undefined) {
-      return `Buy ${obj.buy} Get ${obj.free} Free`;
+      return `${obj.buy}+${obj.free}`;
     }
     if (obj.type !== undefined) {
       return `Scheme: ${obj.type}`;
