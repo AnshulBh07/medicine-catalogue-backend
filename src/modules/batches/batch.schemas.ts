@@ -52,6 +52,14 @@ const discountPercent = z.coerce.number()
     message: 'Discount percent must have at most 2 decimal places',
   });
 
+const gstPercent = z.coerce.number()
+  .finite()
+  .min(0)
+  .max(100)
+  .refine(hasMaxTwoDecimals, {
+    message: 'GST percent must have at most 2 decimal places',
+  });
+
 const jsonValue: z.ZodType<unknown> = z.lazy(() => z.union([
   z.string(),
   z.number().finite(),
@@ -64,6 +72,7 @@ export const batchCommercialDetailsSchema = z.object({
   purchaseRate: money.optional().default(0),
   mrp: money,
   discountPercent: discountPercent.optional().default(0),
+  gstPercent: gstPercent.optional().default(0),
   scheme: jsonValue.nullable().optional(),
   privateNotes: z.string().trim().max(100000).nullable().optional(),
 }).strict();
@@ -78,6 +87,7 @@ export const createBatchSchema = z
     purchaseRate: money.optional(),
     mrp: money.optional(),
     discountPercent: discountPercent.optional(),
+    gstPercent: gstPercent.optional(),
     scheme: jsonValue.nullable().optional(),
     privateNotes: z.string().trim().max(100000).nullable().optional(),
   })
@@ -93,6 +103,7 @@ export const updateBatchSchema = z
     purchaseRate: money.optional(),
     mrp: money.optional(),
     discountPercent: discountPercent.optional(),
+    gstPercent: gstPercent.optional(),
     scheme: jsonValue.nullable().optional(),
     privateNotes: z.string().trim().max(100000).nullable().optional(),
   })

@@ -26,6 +26,14 @@ const discountPercent = z.coerce.number()
     message: 'Discount percent must have at most 2 decimal places',
   });
 
+const gstPercent = z.coerce.number()
+  .finite()
+  .min(0)
+  .max(100)
+  .refine(hasMaxTwoDecimals, {
+    message: 'GST percent must have at most 2 decimal places',
+  });
+
 const jsonValue: z.ZodType<Prisma.InputJsonValue> = z.lazy(() => z.union([
   z.string(),
   z.number().finite(),
@@ -46,6 +54,7 @@ const commercialDetailsFields = {
   purchaseRate: money,
   mrp: money,
   discountPercent,
+  gstPercent: gstPercent.optional().default(0),
   scheme: jsonValue.nullable().optional(),
   privateNotes: z.string().trim().nullable().optional(),
 };

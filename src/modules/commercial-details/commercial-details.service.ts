@@ -21,6 +21,7 @@ export type PublicCommercialDetails = {
   purchaseRate: number;
   mrp: number;
   discountPercent: number;
+  gstPercent: number;
   scheme: Prisma.JsonValue | null;
   privateNotes: string | null;
   updatedAt: Date;
@@ -74,6 +75,7 @@ const toPublicCommercialDetails = (details: CommercialDetailsRecord): PublicComm
   purchaseRate: Number(details.purchaseRate),
   mrp: Number(details.mrp),
   discountPercent: Number(details.discountPercent),
+  gstPercent: Number(details.gstPercent ?? 0),
   scheme: details.scheme,
   privateNotes: details.privateNotes,
   updatedAt: details.updatedAt,
@@ -123,6 +125,7 @@ export const createCommercialDetails = async (
         purchaseRate: input.purchaseRate,
         mrp: input.mrp,
         discountPercent: input.discountPercent,
+        gstPercent: input.gstPercent ?? 0,
         scheme: toPrismaScheme(input.scheme ?? null) ?? Prisma.DbNull,
         privateNotes: input.privateNotes ?? null,
         updatedBy,
@@ -158,6 +161,7 @@ export const updateCommercialDetails = async (
       ...(input.purchaseRate === undefined ? {} : { purchaseRate: input.purchaseRate }),
       ...(input.mrp === undefined ? {} : { mrp: input.mrp }),
       ...(input.discountPercent === undefined ? {} : { discountPercent: input.discountPercent }),
+      ...(input.gstPercent === undefined ? {} : { gstPercent: input.gstPercent }),
       ...(schemeValue === undefined ? {} : { scheme: schemeValue }),
       ...(input.privateNotes === undefined ? {} : { privateNotes: input.privateNotes }),
       updatedBy,
@@ -235,6 +239,7 @@ export const createCommercialDetailsForMedicine = async (
         purchaseRate: input.purchaseRate,
         mrp: input.mrp,
         discountPercent: input.discountPercent,
+        gstPercent: input.gstPercent ?? 0,
         scheme: toPrismaScheme(input.scheme ?? null) ?? Prisma.DbNull,
         privateNotes: input.privateNotes ?? null,
         updatedBy,
@@ -289,6 +294,7 @@ export const updateCommercialDetailsForMedicine = async (
           ...(input.purchaseRate === undefined ? {} : { purchaseRate: input.purchaseRate }),
           ...(input.mrp === undefined ? {} : { mrp: input.mrp }),
           ...(input.discountPercent === undefined ? {} : { discountPercent: input.discountPercent }),
+          ...(input.gstPercent === undefined ? {} : { gstPercent: input.gstPercent }),
           ...(schemeValue === undefined ? {} : { scheme: schemeValue }),
           ...(input.privateNotes === undefined ? {} : { privateNotes: input.privateNotes }),
           updatedBy,
@@ -303,6 +309,7 @@ export const updateCommercialDetailsForMedicine = async (
           purchaseRate: input.purchaseRate ?? 0,
           mrp: input.mrp ?? 0,
           discountPercent: input.discountPercent ?? 0,
+          gstPercent: input.gstPercent ?? 0,
           scheme: schemeValue ?? Prisma.DbNull,
           privateNotes: input.privateNotes ?? null,
           updatedBy,

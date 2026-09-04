@@ -112,6 +112,7 @@ export const listManufacturers = async (
     switch (sortBy) {
       case 'name_desc':
         return b.name.localeCompare(a.name);
+      case 'createdAt':
       case 'newest':
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       case 'oldest':
@@ -170,7 +171,7 @@ export const createManufacturer = async (
   await ensureUniqueName(input.name, db);
   try {
     const created = await db.manufacturer.create({
-      data: { name: input.name, active: true },
+      data: { name: input.name, active: input.active !== undefined ? input.active : true },
     });
     return {
       id: created.id,

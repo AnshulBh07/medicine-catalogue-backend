@@ -4,7 +4,12 @@ const manufacturerFields = {
   name: z.string().trim().min(1).max(255),
 };
 
-export const createManufacturerSchema = z.object(manufacturerFields).strict();
+export const createManufacturerSchema = z
+  .object({
+    ...manufacturerFields,
+    active: z.boolean().optional(),
+  })
+  .strict();
 
 export const updateManufacturerSchema = z
   .object({
@@ -31,7 +36,7 @@ export const listManufacturersSchema = z.object({
   active: z.enum(['active', 'inactive', 'all']).optional(),
   hasMedicines: z.enum(['true', 'false', 'all']).optional(),
   sortBy: z
-    .enum(['name_asc', 'name_desc', 'newest', 'oldest', 'medicines_high', 'medicines_low'])
+    .enum(['name_asc', 'name_desc', 'newest', 'oldest', 'medicines_high', 'medicines_low', 'createdAt'])
     .optional(),
 });
 

@@ -20,6 +20,7 @@ export type PublicBatchCommercialDetails = {
   purchaseRate: number;
   mrp: number;
   discountPercent: number;
+  gstPercent: number;
   scheme: Prisma.JsonValue | null;
   privateNotes: string | null;
   updatedAt: Date;
@@ -67,6 +68,7 @@ const toPublicBatch = (batch: BatchRecord, isAdmin = false): PublicBatch => ({
         purchaseRate: Number(batch.commercialDetails.purchaseRate),
         mrp: Number(batch.commercialDetails.mrp),
         discountPercent: Number(batch.commercialDetails.discountPercent),
+        gstPercent: Number(batch.commercialDetails.gstPercent ?? 0),
         scheme: batch.commercialDetails.scheme,
         privateNotes: batch.commercialDetails.privateNotes,
         updatedAt: batch.commercialDetails.updatedAt,
@@ -160,6 +162,7 @@ export const createBatch = async (
     purchaseRate: input.purchaseRate ?? 0,
     mrp: input.mrp,
     discountPercent: input.discountPercent ?? 0,
+    gstPercent: input.gstPercent ?? 0,
     scheme: input.scheme ?? null,
     privateNotes: input.privateNotes ?? null,
   } : undefined);
@@ -190,6 +193,7 @@ export const createBatch = async (
           purchaseRate: commData.purchaseRate ?? 0,
           mrp: commData.mrp,
           discountPercent: commData.discountPercent ?? 0,
+          gstPercent: commData.gstPercent ?? 0,
           scheme: commData.scheme === undefined || commData.scheme === null
             ? Prisma.DbNull
             : (commData.scheme as Prisma.InputJsonValue),
@@ -231,6 +235,7 @@ export const updateBatch = async (
     purchaseRate: input.purchaseRate,
     mrp: input.mrp,
     discountPercent: input.discountPercent,
+    gstPercent: input.gstPercent,
     scheme: input.scheme,
     privateNotes: input.privateNotes,
   } : undefined);
@@ -266,6 +271,7 @@ export const updateBatch = async (
             purchaseRate: commData.purchaseRate !== undefined ? commData.purchaseRate : existingCommercial.purchaseRate,
             mrp: commData.mrp !== undefined ? commData.mrp : existingCommercial.mrp,
             discountPercent: commData.discountPercent !== undefined ? commData.discountPercent : existingCommercial.discountPercent,
+            gstPercent: commData.gstPercent !== undefined ? commData.gstPercent : existingCommercial.gstPercent,
             scheme: commData.scheme === undefined
               ? (existingCommercial.scheme === null ? Prisma.DbNull : (existingCommercial.scheme as Prisma.InputJsonValue))
               : commData.scheme === null ? Prisma.DbNull : (commData.scheme as Prisma.InputJsonValue),
@@ -280,6 +286,7 @@ export const updateBatch = async (
             purchaseRate: commData.purchaseRate ?? 0,
             mrp: commData.mrp,
             discountPercent: commData.discountPercent ?? 0,
+            gstPercent: commData.gstPercent ?? 0,
             scheme: commData.scheme === undefined || commData.scheme === null
               ? Prisma.DbNull
               : (commData.scheme as Prisma.InputJsonValue),

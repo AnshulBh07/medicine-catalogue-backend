@@ -575,6 +575,7 @@ export const createMedicine = async (
       purchaseRate: number;
       mrp: number;
       discountPercent: number;
+      gstPercent: number;
       scheme?: Prisma.InputJsonValue | null;
       privateNotes?: string | null;
     } | undefined;
@@ -589,6 +590,7 @@ export const createMedicine = async (
           purchaseRate: fbComm.purchaseRate ?? 0,
           mrp: fbComm.mrp,
           discountPercent: fbComm.discountPercent ?? 0,
+          gstPercent: fbComm.gstPercent ?? 0,
           scheme: fbComm.scheme as Prisma.InputJsonValue,
           privateNotes: fbComm.privateNotes,
         };
@@ -597,6 +599,7 @@ export const createMedicine = async (
           purchaseRate: input.firstBatch.purchaseRate ?? 0,
           mrp: input.firstBatch.mrp,
           discountPercent: input.firstBatch.discountPercent ?? 0,
+          gstPercent: input.firstBatch.gstPercent ?? 0,
           scheme: input.firstBatch.scheme as Prisma.InputJsonValue,
           privateNotes: input.firstBatch.privateNotes,
         };
@@ -610,6 +613,7 @@ export const createMedicine = async (
           purchaseRate: input.commercialDetails.purchaseRate ?? 0,
           mrp: input.commercialDetails.mrp,
           discountPercent: input.commercialDetails.discountPercent ?? 0,
+          gstPercent: input.commercialDetails.gstPercent ?? 0,
           scheme: input.commercialDetails.scheme as Prisma.InputJsonValue,
           privateNotes: input.commercialDetails.privateNotes,
         };
@@ -618,6 +622,7 @@ export const createMedicine = async (
           purchaseRate: input.purchaseRate ?? 0,
           mrp: input.mrp,
           discountPercent: input.discountPercent ?? 0,
+          gstPercent: input.gstPercent ?? 0,
           scheme: input.scheme as Prisma.InputJsonValue,
           privateNotes: input.privateNotes,
         };
@@ -631,6 +636,7 @@ export const createMedicine = async (
           purchaseRate: input.commercialDetails.purchaseRate ?? 0,
           mrp: input.commercialDetails.mrp,
           discountPercent: input.commercialDetails.discountPercent ?? 0,
+          gstPercent: input.commercialDetails.gstPercent ?? 0,
           scheme: input.commercialDetails.scheme as Prisma.InputJsonValue,
           privateNotes: input.commercialDetails.privateNotes,
         };
@@ -639,6 +645,7 @@ export const createMedicine = async (
           purchaseRate: input.purchaseRate ?? 0,
           mrp: input.mrp!,
           discountPercent: input.discountPercent ?? 0,
+          gstPercent: input.gstPercent ?? 0,
           scheme: input.scheme as Prisma.InputJsonValue,
           privateNotes: input.privateNotes,
         };
@@ -666,6 +673,7 @@ export const createMedicine = async (
             purchaseRate: commData.purchaseRate ?? 0,
             mrp: commData.mrp,
             discountPercent: commData.discountPercent ?? 0,
+            gstPercent: commData.gstPercent ?? 0,
             scheme:
               commData.scheme === undefined || commData.scheme === null
                 ? Prisma.DbNull
@@ -784,6 +792,7 @@ export const updateMedicine = async (
       purchaseRate: input.purchaseRate,
       mrp: input.mrp,
       discountPercent: input.discountPercent,
+      gstPercent: input.gstPercent,
       scheme: input.scheme,
       privateNotes: input.privateNotes,
     } : undefined);
@@ -820,6 +829,9 @@ export const updateMedicine = async (
             discountPercent: commData.discountPercent !== undefined
               ? commData.discountPercent
               : latestBatch.commercialDetails.discountPercent,
+            gstPercent: commData.gstPercent !== undefined
+              ? commData.gstPercent
+              : latestBatch.commercialDetails.gstPercent,
             scheme:
               commData.scheme === undefined
                 ? (latestBatch.commercialDetails.scheme === null
@@ -842,6 +854,7 @@ export const updateMedicine = async (
             purchaseRate: commData.purchaseRate ?? 0,
             mrp: commData.mrp,
             discountPercent: commData.discountPercent ?? 0,
+            gstPercent: commData.gstPercent ?? 0,
             scheme:
               commData.scheme === undefined || commData.scheme === null
                 ? Prisma.DbNull
