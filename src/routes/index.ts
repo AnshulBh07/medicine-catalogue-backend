@@ -16,6 +16,7 @@ import { manufacturersRouter } from '../modules/manufacturers/manufacturer.route
 import { uploadsRouter } from '../modules/uploads/upload.routes.js';
 import { attendanceRouter } from '../modules/attendance/attendance.routes.js';
 import { shortagesRouter } from '../modules/shortages/shortage.routes.js';
+import { dealsRouter } from '../modules/deals/deal.routes.js';
 
 export const router = Router();
 
@@ -23,6 +24,7 @@ router.use('/auth', authRouter);
 router.use('/users', usersRouter);
 router.use('/attendance', attendanceRouter);
 router.use('/shortages', shortagesRouter);
+router.use('/deals', dealsRouter);
 router.use('/salts', saltsRouter);
 router.use('/composition-salts', compositionSaltsRouter);
 router.use('/compositions', compositionsRouter);
