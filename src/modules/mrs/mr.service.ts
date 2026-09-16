@@ -1,6 +1,7 @@
 import { Prisma, type MR, type Medicine, type Manufacturer } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import type { PublicMedicine } from '../medicines/medicine.service.js';
 import type {
   AssignMrMedicinesInput,
@@ -283,7 +284,27 @@ export const createMr = async (
       throw new AppError(500, 'INTERNAL_SERVER_ERROR', 'Failed to create MR');
     }
 
-    return toPublicMr(createdMr);
+    const publicMr = toPublicMr(createdMr);
+
+    try {
+      await NotificationService.createForRole(
+        'ALL',
+        {
+          type: 'MR_CREATED',
+          priority: 'UPDATE',
+          title: 'Representative added',
+          message: `${publicMr.name} was added as a\nmedical representative.`,
+          entityType: 'MR',
+          entityId: publicMr.id,
+          dedupeKey: `MR_CREATED:${publicMr.id}`,
+          metadata: { mrId: publicMr.id, mrName: publicMr.name, company: publicMr.company },
+        },
+      );
+    } catch {
+      // Non-blocking notification
+    }
+
+    return publicMr;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw new AppError(409, 'DUPLICATE_MR', 'MR conflicts with an existing record');
@@ -312,7 +333,28 @@ export const updateMr = async (
         active: input.active !== undefined ? input.active : existing.active,
       },
     });
-    return toPublicMr(updated);
+
+    const publicMr = toPublicMr(updated);
+
+    try {
+      await NotificationService.createForRole(
+        'ALL',
+        {
+          type: 'MR_UPDATED',
+          priority: 'UPDATE',
+          title: 'Representative updated',
+          message: `${publicMr.name}'s information\nwas updated.`,
+          entityType: 'MR',
+          entityId: publicMr.id,
+          dedupeKey: `MR_UPDATED:${publicMr.id}:${new Date(publicMr.updatedAt).getTime()}`,
+          metadata: { mrId: publicMr.id, mrName: publicMr.name, company: publicMr.company },
+        },
+      );
+    } catch {
+      // Non-blocking notification
+    }
+
+    return publicMr;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw new AppError(409, 'DUPLICATE_MR', 'MR conflicts with an existing record');
@@ -330,7 +372,27 @@ export const deactivateMr = async (
   if (!existing.active) return toPublicMr(existing);
 
   const updated = await db.mR.update({ where: { id }, data: { active: false } });
-  return toPublicMr(updated);
+  const publicMr = toPublicMr(updated);
+
+  try {
+    await NotificationService.createForRole(
+      'ALL',
+      {
+        type: 'MR_DELETED',
+        priority: 'UPDATE',
+        title: 'Representative removed',
+        message: `${publicMr.name} was removed.`,
+        entityType: 'MR',
+        entityId: publicMr.id,
+        dedupeKey: `MR_DELETED:${publicMr.id}:${Date.now()}`,
+        metadata: { mrId: publicMr.id, mrName: publicMr.name },
+      },
+    );
+  } catch {
+    // Non-blocking notification
+  }
+
+  return publicMr;
 };
 
 export const getMrMedicines = async (

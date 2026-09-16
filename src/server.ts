@@ -2,9 +2,15 @@ import { app } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { prisma } from './lib/prisma.js';
+import {
+  startNotificationScheduler,
+  stopNotificationScheduler,
+} from './modules/notifications/notification.scheduler.js';
 
 const startServer = async (): Promise<void> => {
   await prisma.$connect();
+
+  startNotificationScheduler();
 
   const host = env.HOST;
   const server = app.listen(env.PORT, host, () => {
@@ -19,6 +25,7 @@ const startServer = async (): Promise<void> => {
 
     shuttingDown = true;
     logger.info(`Received ${signal}; shutting down gracefully`);
+    stopNotificationScheduler();
 
     // Force terminate if cleanup hangs longer than 10 seconds
     const forceExitTimeout = setTimeout(() => {

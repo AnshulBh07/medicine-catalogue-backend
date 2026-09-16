@@ -84,6 +84,7 @@ model User {
   attendanceRecords        AttendanceRecord[]
   shortageItems            ShortageItem[]
   deals                    Deal[]
+  notifications            Notification[]
 }
 
 model Medicine {
@@ -294,6 +295,7 @@ model Deal {
   agreedBillDiscount Decimal    @db.Decimal(5, 2)
   mrPhoneSnapshot    String?    @db.VarChar(20)
   status             DealStatus @default(PENDING)
+  statusUpdatedAt    DateTime   @default(now()) @db.Timestamptz(6)
   notes              String?    @db.Text
   createdById        String?    @db.Uuid
   createdAt          DateTime   @default(now()) @db.Timestamptz(6)
@@ -306,7 +308,55 @@ model Deal {
   @@index([medicineId])
   @@index([mrId])
   @@index([status])
+  @@index([statusUpdatedAt])
   @@index([dealDate])
   @@index([createdAt])
+}
+
+enum NotificationType {
+  MEDICINE_EXPIRED
+  MEDICINE_EXPIRING_SOON
+  DEAL_INACTIVE_30_DAYS
+  DEAL_CREATED
+  DEAL_STATUS_CHANGED
+  DEAL_RECEIVED
+  MEDICINE_CREATED
+  MEDICINE_UPDATED
+  MEDICINE_DELETED
+  MR_CREATED
+  MR_UPDATED
+  MR_DELETED
+}
+
+enum NotificationPriority {
+  CRITICAL
+  ATTENTION
+  UPDATE
+}
+
+model Notification {
+  id         String               @id @default(uuid()) @db.Uuid
+  userId     String               @db.Uuid
+  type       NotificationType
+  priority   NotificationPriority
+  title      String               @db.VarChar(255)
+  message    String               @db.Text
+  entityType String               @db.VarChar(50)
+  entityId   String?              @db.Uuid
+  isRead     Boolean              @default(false)
+  readAt     DateTime?            @db.Timestamptz(6)
+  isResolved Boolean              @default(false)
+  resolvedAt DateTime?            @db.Timestamptz(6)
+  dedupeKey  String?              @db.VarChar(255)
+  metadata   Json?
+  createdAt  DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime             @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
 }
 

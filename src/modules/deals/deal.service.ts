@@ -1,6 +1,7 @@
 import { Prisma, type DealStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { AppError } from '../../common/errors/app-error.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import type {
   CreateDealInput,
   ListDealsInput,
@@ -35,6 +36,7 @@ export interface PublicDeal {
   agreedBillDiscount: number;
   mrPhoneSnapshot: string | null;
   status: DealStatus;
+  statusUpdatedAt: string;
   notes: string | null;
   createdById: string | null;
   createdBy: {
@@ -112,6 +114,7 @@ const toPublicDeal = (deal: DealRecordWithRelations): PublicDeal => ({
   agreedBillDiscount: Number(deal.agreedBillDiscount),
   mrPhoneSnapshot: deal.mrPhoneSnapshot,
   status: deal.status,
+  statusUpdatedAt: deal.statusUpdatedAt ? deal.statusUpdatedAt.toISOString() : deal.createdAt.toISOString(),
   notes: deal.notes,
   createdById: deal.createdById,
   createdBy: deal.createdBy
@@ -160,7 +163,7 @@ export const createDeal = async (
 
   const mr = await db.mR.findUnique({
     where: { id: input.mrId },
-    select: { id: true, name: true, phone: true },
+    select: { id: true, name: true, phone: true, company: true },
   });
   if (!mr) {
     throw new AppError(404, 'NOT_FOUND', 'Medical representative not found');
@@ -200,6 +203,31 @@ export const createDeal = async (
   if (existingPending) {
     const formattedDate = existingPending.dealDate.toISOString().split('T')[0];
     warning = `Note: An existing pending deal for ${medicine.name} with ${mr.name} is already on record (created on ${formattedDate}).`;
+  }
+
+  try {
+    await NotificationService.createForRole(
+      'ADMIN',
+      {
+        type: 'DEAL_CREATED',
+        priority: 'UPDATE',
+        title: 'Deal created',
+        message: `A deal was recorded for ${deal.medicine.name} with ${deal.mr.company || deal.mr.name}.`,
+        entityType: 'MEDICINE_DEAL',
+        entityId: deal.id,
+        dedupeKey: `DEAL_CREATED:${deal.id}`,
+        metadata: {
+          dealId: deal.id,
+          medicineId: deal.medicineId,
+          medicineName: deal.medicine.name,
+          mrId: deal.mrId,
+          mrName: deal.mr.name,
+        },
+      },
+      { db },
+    );
+  } catch {
+    // Notification failure should not fail transaction
   }
 
   return {
@@ -366,6 +394,9 @@ export const updateDeal = async (
     }
   }
 
+  const isStatusChanged = input.status !== undefined && input.status !== existing.status;
+  const newStatusUpdatedAt = isStatusChanged ? new Date() : undefined;
+
   const updated = await db.deal.update({
     where: { id },
     data: {
@@ -377,10 +408,65 @@ export const updateDeal = async (
       ...(input.agreedBillDiscount !== undefined ? { agreedBillDiscount: input.agreedBillDiscount } : {}),
       ...(input.mrPhoneSnapshot !== undefined ? { mrPhoneSnapshot: input.mrPhoneSnapshot } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(newStatusUpdatedAt ? { statusUpdatedAt: newStatusUpdatedAt } : {}),
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
     },
     include: dealInclude,
   });
+
+  if (isStatusChanged) {
+    try {
+      await NotificationService.resolveOrSupersede('MEDICINE_DEAL', updated.id, ['DEAL_INACTIVE_30_DAYS'], db);
+
+      if (updated.status === 'RECEIVED') {
+        await NotificationService.createForRole(
+          'ADMIN',
+          {
+            type: 'DEAL_RECEIVED',
+            priority: 'UPDATE',
+            title: 'Deal received',
+            message: `${updated.medicine.name} deal has been marked as received.`,
+            entityType: 'MEDICINE_DEAL',
+            entityId: updated.id,
+            dedupeKey: `DEAL_RECEIVED:${updated.id}:${updated.statusUpdatedAt.getTime()}`,
+            metadata: {
+              dealId: updated.id,
+              medicineId: updated.medicineId,
+              medicineName: updated.medicine.name,
+              mrId: updated.mrId,
+              mrName: updated.mr.name,
+              status: updated.status,
+            },
+          },
+          { db },
+        );
+      } else {
+        await NotificationService.createForRole(
+          'ADMIN',
+          {
+            type: 'DEAL_STATUS_CHANGED',
+            priority: 'UPDATE',
+            title: 'Deal status updated',
+            message: `${updated.medicine.name} deal status was changed.`,
+            entityType: 'MEDICINE_DEAL',
+            entityId: updated.id,
+            dedupeKey: `DEAL_STATUS_CHANGED:${updated.id}:${updated.status}:${updated.statusUpdatedAt.getTime()}`,
+            metadata: {
+              dealId: updated.id,
+              medicineId: updated.medicineId,
+              medicineName: updated.medicine.name,
+              mrId: updated.mrId,
+              mrName: updated.mr.name,
+              status: updated.status,
+            },
+          },
+          { db },
+        );
+      }
+    } catch {
+      // Non-blocking notification
+    }
+  }
 
   return toPublicDeal(updated);
 };
@@ -397,11 +483,71 @@ export const updateDealStatus = async (
     throw new AppError(404, 'NOT_FOUND', 'Deal not found');
   }
 
+  const isStatusChanged = status !== existing.status;
+  const statusUpdatedAt = isStatusChanged ? new Date() : existing.statusUpdatedAt;
+
   const updated = await db.deal.update({
     where: { id },
-    data: { status },
+    data: {
+      status,
+      ...(isStatusChanged ? { statusUpdatedAt } : {}),
+    },
     include: dealInclude,
   });
+
+  if (isStatusChanged) {
+    try {
+      await NotificationService.resolveOrSupersede('MEDICINE_DEAL', updated.id, ['DEAL_INACTIVE_30_DAYS'], db);
+
+      if (updated.status === 'RECEIVED') {
+        await NotificationService.createForRole(
+          'ADMIN',
+          {
+            type: 'DEAL_RECEIVED',
+            priority: 'UPDATE',
+            title: 'Deal received',
+            message: `${updated.medicine.name} deal has been marked as received.`,
+            entityType: 'MEDICINE_DEAL',
+            entityId: updated.id,
+            dedupeKey: `DEAL_RECEIVED:${updated.id}:${updated.statusUpdatedAt.getTime()}`,
+            metadata: {
+              dealId: updated.id,
+              medicineId: updated.medicineId,
+              medicineName: updated.medicine.name,
+              mrId: updated.mrId,
+              mrName: updated.mr.name,
+              status: updated.status,
+            },
+          },
+          { db },
+        );
+      } else {
+        await NotificationService.createForRole(
+          'ADMIN',
+          {
+            type: 'DEAL_STATUS_CHANGED',
+            priority: 'UPDATE',
+            title: 'Deal status updated',
+            message: `${updated.medicine.name} deal status was changed.`,
+            entityType: 'MEDICINE_DEAL',
+            entityId: updated.id,
+            dedupeKey: `DEAL_STATUS_CHANGED:${updated.id}:${updated.status}:${updated.statusUpdatedAt.getTime()}`,
+            metadata: {
+              dealId: updated.id,
+              medicineId: updated.medicineId,
+              medicineName: updated.medicine.name,
+              mrId: updated.mrId,
+              mrName: updated.mr.name,
+              status: updated.status,
+            },
+          },
+          { db },
+        );
+      }
+    } catch {
+      // Non-blocking notification
+    }
+  }
 
   return toPublicDeal(updated);
 };

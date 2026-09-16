@@ -2,6 +2,7 @@ import { Prisma, type Batch, type CommercialDetails, type Composition, type Comp
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
 import { r2StorageService } from '../../services/storage/r2.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import { getLatestBatchForMedicine } from '../batches/batch.service.js';
 import { formatCompositionDisplayText } from '../compositions/composition.utils.js';
 import type {
@@ -506,7 +507,7 @@ export const createMedicine = async (
 ): Promise<PublicMedicine> => {
   const saltInputs = input.salts ?? input.compositionSalts;
 
-  return (db as unknown as typeof prisma).$transaction(async (tx) => {
+  const created = await (db as unknown as typeof prisma).$transaction(async (tx) => {
     const resolvedManufacturerId = await resolveManufacturer(tx, {
       manufacturerId: input.manufacturerId,
       manufacturerName: input.manufacturerName,
@@ -695,6 +696,26 @@ export const createMedicine = async (
 
     return toPublicMedicine(createdMedicine);
   });
+
+  try {
+    await NotificationService.createForRole(
+      'ALL',
+      {
+        type: 'MEDICINE_CREATED',
+        priority: 'UPDATE',
+        title: 'Medicine added',
+        message: `${created.name} was added to the\ncatalogue.`,
+        entityType: 'MEDICINE',
+        entityId: created.id,
+        dedupeKey: `MEDICINE_CREATED:${created.id}`,
+        metadata: { medicineId: created.id, medicineName: created.name },
+      },
+    );
+  } catch {
+    // Non-blocking notification
+  }
+
+  return created;
 };
 
 export const updateMedicine = async (
@@ -883,6 +904,24 @@ export const updateMedicine = async (
     await r2StorageService.deleteObjectByPublicUrl(oldImageUrlToDelete);
   }
 
+  try {
+    await NotificationService.createForRole(
+      'ALL',
+      {
+        type: 'MEDICINE_UPDATED',
+        priority: 'UPDATE',
+        title: 'Medicine updated',
+        message: `${result.name} information\nwas updated.`,
+        entityType: 'MEDICINE',
+        entityId: result.id,
+        dedupeKey: `MEDICINE_UPDATED:${result.id}:${new Date(result.updatedAt).getTime()}`,
+        metadata: { medicineId: result.id, medicineName: result.name },
+      },
+    );
+  } catch {
+    // Non-blocking notification
+  }
+
   return result;
 };
 
@@ -902,6 +941,24 @@ export const deactivateMedicine = async (
 
   if (existing.imageUrl) {
     await r2StorageService.deleteObjectByPublicUrl(existing.imageUrl);
+  }
+
+  try {
+    await NotificationService.createForRole(
+      'ALL',
+      {
+        type: 'MEDICINE_DELETED',
+        priority: 'UPDATE',
+        title: 'Medicine removed',
+        message: `${result.name} was removed\nfrom the catalogue.`,
+        entityType: 'MEDICINE',
+        entityId: result.id,
+        dedupeKey: `MEDICINE_DELETED:${result.id}:${Date.now()}`,
+        metadata: { medicineId: result.id, medicineName: result.name },
+      },
+    );
+  } catch {
+    // Non-blocking notification
   }
 
   return result;
