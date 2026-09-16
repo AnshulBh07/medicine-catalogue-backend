@@ -27,6 +27,7 @@ export interface FormattedShortageItem {
   medicineId: string;
   date: string;
   quantity: number;
+  currentQuantity: number | null;
   unit: ShortageUnit;
   status: ShortageStatus;
   note: string | null;
@@ -100,6 +101,7 @@ function formatShortageItem(
     medicineId: item.medicineId,
     date: dateStr,
     quantity: item.quantity,
+    currentQuantity: item.currentQuantity,
     unit: item.unit,
     status: item.status,
     note: item.note,
@@ -323,6 +325,7 @@ export const shortageService = {
         medicineId: input.medicineId,
         date: targetDate,
         quantity: input.quantity,
+        currentQuantity: input.currentQuantity !== undefined ? input.currentQuantity : null,
         unit: (input.unit as ShortageUnit) || 'PACK',
         note: input.note ? input.note.trim() : null,
         status: (input.status as ShortageStatus) || 'PENDING',
@@ -366,6 +369,10 @@ export const shortageService = {
 
     if (input.quantity !== undefined) {
       updateData.quantity = input.quantity;
+    }
+
+    if (input.currentQuantity !== undefined) {
+      updateData.currentQuantity = input.currentQuantity;
     }
 
     if (input.unit !== undefined) {

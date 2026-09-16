@@ -28,6 +28,12 @@ export const createShortageItemSchema = z.object({
     .number({ message: 'Quantity must be a number' })
     .int({ message: 'Quantity must be an integer' })
     .positive({ message: 'Quantity must be greater than zero' }),
+  currentQuantity: z
+    .number({ message: 'Current quantity must be a number' })
+    .int({ message: 'Current quantity must be an integer' })
+    .positive({ message: 'Current quantity must be greater than zero' })
+    .nullable()
+    .optional(),
   unit: shortageUnitSchema.default('PACK').optional(),
   note: z
     .string()
@@ -43,6 +49,12 @@ export const patchShortageItemSchema = z.object({
     .number({ message: 'Quantity must be a number' })
     .int({ message: 'Quantity must be an integer' })
     .positive({ message: 'Quantity must be greater than zero' })
+    .optional(),
+  currentQuantity: z
+    .number({ message: 'Current quantity must be a number' })
+    .int({ message: 'Current quantity must be an integer' })
+    .positive({ message: 'Current quantity must be greater than zero' })
+    .nullable()
     .optional(),
   unit: shortageUnitSchema.optional(),
   status: shortageStatusSchema.optional(),

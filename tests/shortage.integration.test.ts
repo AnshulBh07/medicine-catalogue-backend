@@ -379,6 +379,79 @@ describe('Daily Shortage Notebook Integration Tests', () => {
       await prisma.shortageItem.deleteMany({ where: { medicineId: med3.id } });
       await prisma.medicine.delete({ where: { id: med3.id } });
     });
+
+    it('9c. creates shortage item with currentQuantity and verifies persistence', async () => {
+      const medCurrentQty = await prisma.medicine.create({
+        data: {
+          name: `Paracetamol 500mg ${testSuffix}`,
+          compositionId: testCompositionId,
+          form: 'TABLET',
+          packQuantity: 10,
+          packUnit: 'TABLET',
+          manufacturerId: testManufacturerId,
+          prescriptionRequired: true,
+          active: true,
+        },
+      });
+
+      const response = await request(app)
+        .post('/api/v1/shortages')
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .send({
+          medicineId: medCurrentQty.id,
+          date: testDate,
+          currentQuantity: 12,
+          quantity: 50,
+          unit: 'STRIP',
+          note: 'Have 12 strips, order 50 more',
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.shortageItem).toMatchObject({
+        currentQuantity: 12,
+        quantity: 50,
+        unit: 'STRIP',
+      });
+
+      // Verify retrieval by ID returns currentQuantity
+      const getRes = await request(app)
+        .get(`/api/v1/shortages/${response.body.shortageItem.id}`)
+        .set('Authorization', `Bearer ${employeeToken}`);
+
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.shortageItem.currentQuantity).toBe(12);
+      expect(getRes.body.shortageItem.quantity).toBe(50);
+
+      // Cleanup
+      await prisma.shortageItem.deleteMany({ where: { medicineId: medCurrentQty.id } });
+      await prisma.medicine.delete({ where: { id: medCurrentQty.id } });
+    });
+
+    it('9d. rejects non-positive or invalid currentQuantity with 400', async () => {
+      const res1 = await request(app)
+        .post('/api/v1/shortages')
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .send({
+          medicineId: testMedicine1Id,
+          date: testDate,
+          quantity: 10,
+          currentQuantity: 0,
+        });
+
+      expect(res1.status).toBe(400);
+
+      const res2 = await request(app)
+        .post('/api/v1/shortages')
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .send({
+          medicineId: testMedicine1Id,
+          date: testDate,
+          quantity: 10,
+          currentQuantity: -5,
+        });
+
+      expect(res2.status).toBe(400);
+    });
   });
 
   describe('Listing & Filtering Shortage Items', () => {
@@ -448,6 +521,26 @@ describe('Daily Shortage Notebook Integration Tests', () => {
       expect(response.status).toBe(200);
       expect(response.body.shortageItem.quantity).toBe(25);
       expect(response.body.shortageItem.note).toBe('Updated: increase quantity to 25 packs');
+    });
+
+    it('13b. updates shortage currentQuantity via patch', async () => {
+      const response = await request(app)
+        .patch(`/api/v1/shortages/${itemIdToUpdate}`)
+        .set('Authorization', `Bearer ${employeeToken}`)
+        .send({
+          currentQuantity: 15,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.body.shortageItem.currentQuantity).toBe(15);
+
+      // Verify retrieval returns the updated currentQuantity
+      const getRes = await request(app)
+        .get(`/api/v1/shortages/${itemIdToUpdate}`)
+        .set('Authorization', `Bearer ${employeeToken}`);
+
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.shortageItem.currentQuantity).toBe(15);
     });
 
     it('14. transitions status to ORDERED', async () => {
