@@ -85,6 +85,7 @@ model User {
   shortageItems            ShortageItem[]
   deals                    Deal[]
   notifications            Notification[]
+  medicineAlternatives     MedicineAlternative[] @relation("MedicineAlternativeCreatedBy")
 }
 
 model Medicine {
@@ -115,6 +116,8 @@ model Medicine {
   batches           Batch[]
   shortageItems     ShortageItem[]
   deals             Deal[]
+  sourceAlternatives MedicineAlternative[] @relation("SourceMedicineAlternatives")
+  targetAlternatives MedicineAlternative[] @relation("TargetMedicineAlternatives")
 }
 
 model Salt {
@@ -327,6 +330,9 @@ enum NotificationType {
   MR_CREATED
   MR_UPDATED
   MR_DELETED
+  MEDICINE_ALTERNATIVE_CREATED
+  MEDICINE_ALTERNATIVE_UPDATED
+  MEDICINE_ALTERNATIVE_DELETED
 }
 
 enum NotificationPriority {
@@ -359,5 +365,23 @@ model Notification {
   @@index([userId, isRead])
   @@index([userId, createdAt])
   @@index([entityType, entityId])
+}
+
+model MedicineAlternative {
+  id                    String   @id @default(uuid()) @db.Uuid
+  sourceMedicineId      String   @db.Uuid
+  alternativeMedicineId String   @db.Uuid
+  createdById           String?  @db.Uuid
+  createdAt             DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(6)
+
+  sourceMedicine      Medicine @relation("SourceMedicineAlternatives", fields: [sourceMedicineId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  alternativeMedicine Medicine @relation("TargetMedicineAlternatives", fields: [alternativeMedicineId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdBy           User?    @relation("MedicineAlternativeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([sourceMedicineId, alternativeMedicineId])
+  @@index([sourceMedicineId])
+  @@index([alternativeMedicineId])
+  @@index([createdAt])
 }
 

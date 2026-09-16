@@ -18,6 +18,7 @@ import { attendanceRouter } from '../modules/attendance/attendance.routes.js';
 import { shortagesRouter } from '../modules/shortages/shortage.routes.js';
 import { dealsRouter } from '../modules/deals/deal.routes.js';
 import { notificationsRouter } from '../modules/notifications/notification.routes.js';
+import { medicineAlternativesRouter } from '../modules/medicine-alternatives/medicine-alternative.routes.js';
 
 export const router = Router();
 
@@ -27,6 +28,7 @@ router.use('/attendance', attendanceRouter);
 router.use('/shortages', shortagesRouter);
 router.use('/deals', dealsRouter);
 router.use('/notifications', notificationsRouter);
+router.use('/medicine-alternatives', medicineAlternativesRouter);
 router.use('/salts', saltsRouter);
 router.use('/composition-salts', compositionSaltsRouter);
 router.use('/compositions', compositionsRouter);
