@@ -13,11 +13,19 @@ export type AuthClaims = {
 };
 
 export const signAccessToken = async (claims: AuthClaims): Promise<string> =>
-  new SignJWT({ role: claims.role })
+  new SignJWT({ role: claims.role, type: 'access' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.userId)
     .setIssuedAt()
     .setExpirationTime(env.JWT_EXPIRES_IN)
+    .sign(signingKey);
+
+export const signRefreshToken = async (claims: AuthClaims): Promise<string> =>
+  new SignJWT({ role: claims.role, type: 'refresh' })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setSubject(claims.userId)
+    .setIssuedAt()
+    .setExpirationTime('30d')
     .sign(signingKey);
 
 export const verifyAccessToken = async (token: string): Promise<AuthClaims> => {
@@ -28,7 +36,11 @@ export const verifyAccessToken = async (token: string): Promise<AuthClaims> => {
 
     const role = roleSchema.safeParse(payload.role);
 
-    if (typeof payload.sub !== 'string' || !role.success) {
+    if (
+      typeof payload.sub !== 'string' ||
+      !role.success ||
+      payload.type === 'refresh'
+    ) {
       throw new Error('Invalid authentication claims');
     }
 
@@ -38,5 +50,30 @@ export const verifyAccessToken = async (token: string): Promise<AuthClaims> => {
     };
   } catch {
     throw new AppError(401, 'UNAUTHENTICATED', 'Authentication is required');
+  }
+};
+
+export const verifyRefreshToken = async (token: string): Promise<AuthClaims> => {
+  try {
+    const { payload } = await jwtVerify(token, signingKey, {
+      algorithms: ['HS256'],
+    });
+
+    const role = roleSchema.safeParse(payload.role);
+
+    if (
+      typeof payload.sub !== 'string' ||
+      !role.success ||
+      payload.type !== 'refresh'
+    ) {
+      throw new Error('Invalid refresh token');
+    }
+
+    return {
+      userId: payload.sub,
+      role: role.data as $Enums.UserRole,
+    };
+  } catch {
+    throw new AppError(401, 'UNAUTHENTICATED', 'Invalid or expired refresh token');
   }
 };

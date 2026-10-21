@@ -27,6 +27,7 @@ export const createUserSchema = z
     password: z.string().min(8).max(128),
     role: roleSchema,
     monthlySalary: z.coerce.number().min(0).max(10000000).optional().nullable(),
+    shiftType: z.enum(['FULL_DAY', 'HALF_DAY']).optional(),
   })
   .refine((value) => (typeof value.email === 'string' && value.email.trim().length > 0)
     || (typeof value.phone === 'string' && value.phone.trim().length > 0), {
@@ -52,6 +53,7 @@ export const updateUserSchema = z
     active: z.boolean().optional(),
     password: z.string().min(8).max(128).optional(),
     monthlySalary: z.coerce.number().min(0).max(10000000).optional().nullable(),
+    shiftType: z.enum(['FULL_DAY', 'HALF_DAY']).optional(),
   })
   .strict();
 

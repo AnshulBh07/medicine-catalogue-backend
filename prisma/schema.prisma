@@ -24,6 +24,11 @@ enum AttendanceStatus {
   LEAVE
 }
 
+enum ShiftType {
+  FULL_DAY
+  HALF_DAY
+}
+
 enum MedicineForm {
   TABLET
   CAPSULE
@@ -77,6 +82,7 @@ model User {
   role                     UserRole
   profileImageUrl          String?             @db.Text
   monthlySalary            Decimal?            @db.Decimal(12, 2)
+  shiftType                ShiftType           @default(FULL_DAY)
   active                   Boolean             @default(true)
   createdAt                DateTime            @default(now()) @db.Timestamptz(6)
   updatedAt                DateTime            @updatedAt @db.Timestamptz(6)
@@ -243,6 +249,7 @@ model AttendanceRecord {
   userId    String           @db.Uuid
   date      DateTime         @db.Date
   status    AttendanceStatus
+  workUnits Decimal?         @db.Decimal(4, 2)
   notes     String?          @db.Text
   createdAt DateTime         @default(now()) @db.Timestamptz(6)
   updatedAt DateTime         @updatedAt @db.Timestamptz(6)

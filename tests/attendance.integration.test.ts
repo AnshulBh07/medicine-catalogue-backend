@@ -1,4 +1,4 @@
-﻿import request from 'supertest';
+import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import argon2 from 'argon2';
 import { app } from '../src/app.js';
@@ -118,13 +118,13 @@ describe('Admin Attendance & Salary Integration Tests', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
-      // August 2026 has 26 working days (31 days - 5 Sundays)
-      expect(response.body.workingDays).toBe(26);
-      expect(response.body.presentDays).toBe(26);
+      // August 2026 has 31 working days (Sundays are regular working days)
+      expect(response.body.workingDays).toBe(31);
+      expect(response.body.presentDays).toBe(31);
       expect(response.body.absentDays).toBe(0);
       expect(response.body.halfDays).toBe(0);
       expect(response.body.leaveDays).toBe(0);
-      expect(response.body.payableDays).toBe(26);
+      expect(response.body.payableDays).toBe(31);
       expect(response.body.attendancePercentage).toBe(100);
       // Full salary: ₹25,000
       expect(response.body.estimatedSalary).toBe(25000);
@@ -193,32 +193,32 @@ describe('Admin Attendance & Salary Integration Tests', () => {
         });
 
       // Employee 1 now has:
-      // Working days = 26
+      // Working days = 31
       // Absent = 2 (Aug 4, Aug 18)
       // Half Day = 1 (Aug 6)
       // Leave = 1 (Aug 10)
-      // Present = 26 - (2 + 1 + 1) = 22
-      // Payable days = 22 + (1 * 0.5) = 22.5
-      // Estimated salary = 25,000 / 26 * 22.5 = 21,634.615 -> 21,635
-      // Attendance % = 22 / 26 * 100 = 84.6%
+      // Present = 31 - (2 + 1 + 1) = 27
+      // Payable days = 27 + (1 * 0.5) = 27.5
+      // Estimated salary = 25,000 / 31 * 27.5 = 22,177.419 -> 22,177
+      // Attendance % = 27 / 31 * 100 = 87.1%
 
       const response = await request(app)
         .get(`/api/v1/attendance/users/${employee1Id}?year=2026&month=8`)
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.workingDays).toBe(26);
+      expect(response.body.workingDays).toBe(31);
       expect(response.body.absentDays).toBe(2);
       expect(response.body.halfDays).toBe(1);
       expect(response.body.leaveDays).toBe(1);
-      expect(response.body.presentDays).toBe(22);
-      expect(response.body.payableDays).toBe(22.5);
-      expect(response.body.attendancePercentage).toBe(84.6);
-      expect(response.body.estimatedSalary).toBe(21635);
+      expect(response.body.presentDays).toBe(27);
+      expect(response.body.payableDays).toBe(27.5);
+      expect(response.body.attendancePercentage).toBe(87.1);
+      expect(response.body.estimatedSalary).toBe(22177);
       expect(response.body.records.length).toBe(4);
     });
 
-    it('10. verifies the prompt exact example: 23 Present, 2 Absent, 1 Half Day, 0 Leave = 23.5 Payable, 88.5% attendance, ₹22,596 salary', async () => {
+    it('10. verifies attendance calculation with 28 Present, 2 Absent, 1 Half Day, 0 Leave = 28.5 Payable', async () => {
       // Reset Aug 10 leave to PRESENT
       await request(app)
         .post('/api/v1/attendance')
@@ -230,28 +230,28 @@ describe('Admin Attendance & Salary Integration Tests', () => {
         });
 
       // Now:
-      // Working days: 26
-      // Present: 23
+      // Working days: 31
+      // Present: 28
       // Absent: 2 (Aug 4, Aug 18)
       // Half Day: 1 (Aug 6)
       // Leave: 0
-      // Payable days: 23.5
-      // Estimated salary: ₹25,000 / 26 * 23.5 = ₹22,596
-      // Attendance %: (23 / 26) * 100 = 88.5%
+      // Payable days: 28.5
+      // Estimated salary: ₹25,000 / 31 * 28.5 = ₹22,984
+      // Attendance %: (28 / 31) * 100 = 90.3%
 
       const response = await request(app)
         .get(`/api/v1/attendance/users/${employee1Id}?year=2026&month=8`)
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.workingDays).toBe(26);
-      expect(response.body.presentDays).toBe(23);
+      expect(response.body.workingDays).toBe(31);
+      expect(response.body.presentDays).toBe(28);
       expect(response.body.absentDays).toBe(2);
       expect(response.body.halfDays).toBe(1);
       expect(response.body.leaveDays).toBe(0);
-      expect(response.body.payableDays).toBe(23.5);
-      expect(response.body.attendancePercentage).toBe(88.5);
-      expect(response.body.estimatedSalary).toBe(22596);
+      expect(response.body.payableDays).toBe(28.5);
+      expect(response.body.attendancePercentage).toBe(90.3);
+      expect(response.body.estimatedSalary).toBe(22984);
     });
 
     it('11. resetting an exception to PRESENT deletes the record from database', async () => {
@@ -304,10 +304,10 @@ describe('Admin Attendance & Salary Integration Tests', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(response.body.records.length).toBe(1);
-      expect(response.body.presentDays).toBe(25);
+      expect(response.body.presentDays).toBe(30);
       expect(response.body.absentDays).toBe(1);
       expect(response.body.halfDays).toBe(0);
-      expect(response.body.payableDays).toBe(25);
+      expect(response.body.payableDays).toBe(30);
     });
 
     it('13. prevents duplicate records by upserting cleanly on the same user and date', async () => {
@@ -378,11 +378,158 @@ describe('Admin Attendance & Salary Integration Tests', () => {
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(attRes.status).toBe(200);
-      // Working days = 26, Half Day = 1 (Aug 18), Present = 25 -> Payable days = 25.5
-      // Estimated salary = 28,000 / 26 * 25.5 = 27,461.538 -> 27,462
+      // Working days = 31, Half Day = 1 (Aug 18), Present = 30 -> Payable days = 30.5
+      // Estimated salary = 28,000 / 31 * 30.5 = 27,548.387 -> 27,548
       expect(attRes.body.user.monthlySalary).toBe(28000);
-      expect(attRes.body.payableDays).toBe(25.5);
-      expect(attRes.body.estimatedSalary).toBe(27462);
+      expect(attRes.body.payableDays).toBe(30.5);
+      expect(attRes.body.estimatedSalary).toBe(27548);
     });
   });
+
+  describe('Feature 2: Sunday Work, Half-Days, and Extra Time', () => {
+    let halfDayEmpId: string;
+
+    beforeAll(async () => {
+      const passwordHash = await argon2.hash('TestPassword123');
+      // Create half-day employee with monthlySalary ₹12,400 (31 days -> ₹400 per half-day shift unit)
+      const hdEmp = await prisma.user.create({
+        data: {
+          name: `Half Day Worker ${testSuffix}`,
+          email: `hd-worker-${testSuffix}@example.com`,
+          phone: `+9197333${testSuffix.slice(-5)}`,
+          passwordHash,
+          role: 'EMPLOYEE',
+          shiftType: 'HALF_DAY',
+          monthlySalary: 12400,
+          active: true,
+        },
+      });
+      halfDayEmpId = hdEmp.id;
+    });
+
+    afterAll(async () => {
+      await prisma.user.deleteMany({
+        where: { id: halfDayEmpId },
+      });
+    });
+
+    it('16. allows recording attendance on Sunday and persists correctly', async () => {
+      // 2026-08-02 is a Sunday
+      const sundayRes = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          userId: employee1Id,
+          date: '2026-08-02',
+          status: 'HALF_DAY',
+          notes: 'Worked half Sunday shift',
+        });
+
+      expect(sundayRes.status).toBe(200);
+      expect(sundayRes.body.record.status).toBe('HALF_DAY');
+      expect(sundayRes.body.record.notes).toBe('Worked half Sunday shift');
+
+      // Verify Sunday attendance appears in employee monthly attendance report
+      const repRes = await request(app)
+        .get(`/api/v1/attendance/users/${employee1Id}?year=2026&month=8`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(repRes.status).toBe(200);
+      const sundayRec = repRes.body.records.find((r: { date: string }) => r.date.startsWith('2026-08-02'));
+      expect(sundayRec).toBeTruthy();
+      expect(sundayRec.status).toBe('HALF_DAY');
+    });
+
+    it('17. calculates pay for a half-day employee working a full day (2 units = ₹800, no overtime multiplier)', async () => {
+      // Half-day employee has monthlySalary ₹12,400. In August (31 days), normal half-day rate is ₹400 (1 unit).
+      // On 2026-08-03, employee works a full day shift (workUnits: 2).
+      const workRes = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          userId: halfDayEmpId,
+          date: '2026-08-03',
+          status: 'PRESENT',
+          workUnits: 2,
+          notes: 'Covered full day shift',
+        });
+
+      expect(workRes.status).toBe(200);
+      expect(Number(workRes.body.record.workUnits)).toBe(2);
+
+      // Verify calculation:
+      // Half-day employee standard month is 31 days * 1 unit = 31 units.
+      // With Aug 3 as 2 units, total units = 30 + 2 = 32 units.
+      // Normal unit rate = ₹12,400 / 31 = ₹400 per half-day unit.
+      // Aug 3 full day alone is 2 units * ₹400 = ₹800!
+      // Total salary = 32 units * ₹400 = ₹12,800.
+      const empRes = await request(app)
+        .get(`/api/v1/attendance/users/${halfDayEmpId}?year=2026&month=8`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(empRes.status).toBe(200);
+      expect(empRes.body.shiftType).toBe('HALF_DAY');
+      expect(empRes.body.estimatedSalary).toBe(12800);
+    });
+
+    it('18. supports extra-time / extended-shift paid at normal rate without overtime premium', async () => {
+      // Set employee2 monthly salary to ₹31,000. In August (31 days), unit rate = (31000/31)/2 = ₹500/unit.
+      await prisma.user.update({
+        where: { id: employee2Id },
+        data: { monthlySalary: 31000 },
+      });
+
+      // On 2026-08-05, employee works a double shift (4 half-day units = 2 full days).
+      const extraRes = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          userId: employee2Id,
+          date: '2026-08-05',
+          status: 'PRESENT',
+          workUnits: 4,
+          notes: 'Double shift coverage',
+        });
+
+      expect(extraRes.status).toBe(200);
+      expect(Number(extraRes.body.record.workUnits)).toBe(4);
+
+      // Total units: 30 days * 2 units + 4 units = 64 units.
+      // Pay = 64 * ₹500 = ₹32,000 (an exact ₹1,000 extra for 2 extra half-day units, no overtime multiplier).
+      const empRes = await request(app)
+        .get(`/api/v1/attendance/users/${employee2Id}?year=2026&month=8`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(empRes.status).toBe(200);
+      expect(empRes.body.estimatedSalary).toBe(32000);
+    });
+
+    it('19. prevents double counting between attendance pay and additional-time pay', async () => {
+      // If employee works 3 units on 2026-08-07, it should count 3 units total, not standard (2) + 3 = 5.
+      const res = await request(app)
+        .post('/api/v1/attendance')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          userId: employee2Id,
+          date: '2026-08-07',
+          status: 'PRESENT',
+          workUnits: 3,
+          notes: 'Full day + half day extended',
+        });
+
+      expect(res.status).toBe(200);
+      expect(Number(res.body.record.workUnits)).toBe(3);
+
+      const empRes = await request(app)
+        .get(`/api/v1/attendance/users/${employee2Id}?year=2026&month=8`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      // Aug 5 was 4 units (+2 extra units = +₹1,000)
+      // Aug 7 was 3 units (+1 extra unit = +₹500)
+      // Remaining 29 days are standard 2 units each = 58 units.
+      // Total units = 58 + 4 + 3 = 65 units.
+      // 65 units * ₹500 = ₹32,500.
+      expect(empRes.body.estimatedSalary).toBe(32500);
+    });
+});
 });

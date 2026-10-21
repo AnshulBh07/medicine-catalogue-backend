@@ -3,7 +3,7 @@ import { Prisma, type User } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
 import type { LoginInput } from './auth.schemas.js';
-import { signAccessToken } from './jwt.js';
+import { type AuthClaims, signAccessToken, signRefreshToken, verifyRefreshToken } from './jwt.js';
 import { toPublicUser, type PublicUser } from '../users/user.service.js';
 
 const AUTHENTICATION_FAILURE = new AppError(
@@ -20,6 +20,7 @@ export interface AuthStore {
 
 export type LoginResult = {
   accessToken: string;
+  refreshToken: string;
   tokenType: 'Bearer';
   user: PublicUser;
 };
@@ -37,8 +38,39 @@ export const login = async (input: LoginInput, db: AuthStore = prisma): Promise<
     throw AUTHENTICATION_FAILURE;
   }
 
+  const claims: AuthClaims = { userId: user.id, role: user.role };
+  const [accessToken, refreshToken] = await Promise.all([
+    signAccessToken(claims),
+    signRefreshToken(claims),
+  ]);
+
   return {
-    accessToken: await signAccessToken({ userId: user.id, role: user.role }),
+    accessToken,
+    refreshToken,
+    tokenType: 'Bearer',
+    user: toPublicUser(user),
+  };
+};
+
+export const refresh = async (token: string, db: AuthStore = prisma): Promise<LoginResult> => {
+  const claims = await verifyRefreshToken(token);
+  const user = await db.user.findFirst({
+    where: { id: claims.userId },
+  });
+
+  if (!user || !user.active) {
+    throw new AppError(401, 'UNAUTHENTICATED', 'Invalid or revoked session');
+  }
+
+  const newClaims: AuthClaims = { userId: user.id, role: user.role };
+  const [accessToken, newRefreshToken] = await Promise.all([
+    signAccessToken(newClaims),
+    signRefreshToken(newClaims),
+  ]);
+
+  return {
+    accessToken,
+    refreshToken: newRefreshToken,
     tokenType: 'Bearer',
     user: toPublicUser(user),
   };

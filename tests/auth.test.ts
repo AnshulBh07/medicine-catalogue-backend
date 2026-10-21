@@ -6,8 +6,8 @@ import { authenticate, type AuthRequest } from '../src/middleware/auth.middlewar
 import { requireRole, type RoleRequest } from '../src/middleware/role.middleware.js';
 import { env } from '../src/config/env.js';
 import { logger } from '../src/lib/logger.js';
-import { signAccessToken, verifyAccessToken } from '../src/modules/auth/jwt.js';
-import { login } from '../src/modules/auth/auth.service.js';
+import { signAccessToken, signRefreshToken, verifyAccessToken, verifyRefreshToken } from '../src/modules/auth/jwt.js';
+import { login, refresh } from '../src/modules/auth/auth.service.js';
 import { createUser } from '../src/modules/users/user.service.js';
 import { createUserSchema, type CreateUserInput } from '../src/modules/users/user.schemas.js';
 
@@ -99,6 +99,56 @@ describe('authentication service', () => {
       message: 'Invalid identifier or password',
     });
   });
+
+  it('logs in successfully and returns a valid refresh token', async () => {
+    const user = await makeUser();
+    const store = { user: { findFirst: vi.fn().mockResolvedValue(user) } };
+
+    const result = await login({ identifier: user.email!, password }, store);
+
+    expect(result.refreshToken).toBeDefined();
+    const refreshClaims = await verifyRefreshToken(result.refreshToken);
+    expect(refreshClaims).toEqual({ userId: user.id, role: $Enums.UserRole.ADMIN });
+  });
+
+  it('refreshes tokens successfully with active user and rotates tokens', async () => {
+    const user = await makeUser();
+    const store = { user: { findFirst: vi.fn().mockResolvedValue(user) } };
+
+    const initialRefreshToken = await signRefreshToken({ userId: user.id, role: user.role });
+    const refreshed = await refresh(initialRefreshToken, store);
+
+    expect(refreshed.accessToken).toBeDefined();
+    expect(refreshed.refreshToken).toBeDefined();
+    expect(refreshed.user.id).toBe(user.id);
+
+    const accessClaims = await verifyAccessToken(refreshed.accessToken);
+    expect(accessClaims.userId).toBe(user.id);
+    const refreshClaims = await verifyRefreshToken(refreshed.refreshToken);
+    expect(refreshClaims.userId).toBe(user.id);
+  });
+
+  it('rejects refresh when user is inactive or deleted with 401', async () => {
+    const user = await makeUser({ active: false });
+    const store = { user: { findFirst: vi.fn().mockResolvedValue(user) } };
+
+    const refreshToken = await signRefreshToken({ userId: user.id, role: user.role });
+
+    await expect(refresh(refreshToken, store)).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'UNAUTHENTICATED',
+      message: 'Invalid or revoked session',
+    });
+  });
+
+  it('rejects an invalid or expired refresh token with 401', async () => {
+    const store = { user: { findFirst: vi.fn() } };
+
+    await expect(refresh('invalid.token.here', store)).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'UNAUTHENTICATED',
+    });
+  });
 });
 
 describe('JWT authentication middleware', () => {
@@ -144,6 +194,16 @@ describe('JWT authentication middleware', () => {
 
     expect(request.auth).toEqual({ userId: 'user-id', role: $Enums.UserRole.ADMIN });
     expect(next).toHaveBeenCalledWith();
+  });
+
+  it('rejects a refresh token used as an access token on protected routes', async () => {
+    const refreshToken = await signRefreshToken({ userId: 'user-id', role: $Enums.UserRole.ADMIN });
+    const request: AuthRequest = { get: makeAuthGet(`Bearer ${refreshToken}`) };
+    const next = vi.fn();
+
+    await authenticate(request, {}, next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
   });
 });
 

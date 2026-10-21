@@ -1,4 +1,4 @@
-import { Prisma, type AttendanceRecord, type AttendanceStatus, type User } from '@prisma/client/index';
+import { Prisma, type AttendanceRecord, type AttendanceStatus, type ShiftType, type User } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
 import { toPublicUser, type PublicUser } from '../users/user.service.js';
@@ -10,6 +10,7 @@ import type {
 import {
   calculateSalary,
   formatDateToISO,
+  getDaysInMonth,
   getMonthDateRange,
   getWorkingDaysInMonth,
   isWorkingDay,
@@ -66,6 +67,7 @@ export interface SerializedAttendanceRecord {
   userId: string;
   date: string;
   status: AttendanceStatus;
+  workUnits: number | null;
   notes: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -73,6 +75,7 @@ export interface SerializedAttendanceRecord {
 
 export interface EmployeeAttendanceDetailResult {
   user: PublicUser;
+  shiftType: ShiftType;
   year: number;
   month: number;
   workingDays: number;
@@ -139,27 +142,55 @@ export const getMonthlyAttendanceSummary = async (
     recordsByUser.set(record.userId, userRecords);
   }
 
+  const totalDaysInMonth = getDaysInMonth(year, month);
+
   const employeeSummaries: EmployeeMonthlySummary[] = employees.map((emp) => {
     const empRecords = recordsByUser.get(emp.id) || [];
+    const recByDate = new Map<string, AttendanceRecord>();
+    for (const rec of empRecords) {
+      recByDate.set(formatDateToISO(rec.date), rec);
+    }
 
     let absentDays = 0;
     let halfDays = 0;
     let leaveDays = 0;
+    let presentDays = 0;
+    let totalWorkUnits = 0;
 
-    for (const rec of empRecords) {
-      if (isWorkingDay(rec.date)) {
-        if (rec.status === 'ABSENT') absentDays++;
-        else if (rec.status === 'HALF_DAY') halfDays++;
-        else if (rec.status === 'LEAVE') leaveDays++;
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const rec = recByDate.get(dateStr);
+
+      if (rec) {
+        if (rec.status === 'ABSENT') {
+          absentDays++;
+        } else if (rec.status === 'LEAVE') {
+          leaveDays++;
+        } else if (rec.status === 'HALF_DAY') {
+          halfDays++;
+          totalWorkUnits += rec.workUnits !== null && rec.workUnits !== undefined ? Number(rec.workUnits) : 1;
+        } else if (rec.status === 'PRESENT') {
+          presentDays++;
+          totalWorkUnits += rec.workUnits !== null && rec.workUnits !== undefined ? Number(rec.workUnits) : 2;
+        }
+      } else {
+        if (emp.shiftType === 'HALF_DAY') {
+          halfDays++;
+          totalWorkUnits += 1;
+        } else {
+          presentDays++;
+          totalWorkUnits += 2;
+        }
       }
     }
 
-    const presentDays = Math.max(0, workingDays - (absentDays + halfDays + leaveDays));
     const salaryResult = calculateSalary({
       monthlySalary: emp.monthlySalary !== null && emp.monthlySalary !== undefined ? Number(emp.monthlySalary) : null,
       workingDays,
       presentDays,
       halfDays,
+      shiftType: emp.shiftType,
+      totalWorkUnits,
     });
 
     return {
@@ -221,14 +252,25 @@ export const getMonthlyAttendanceSummary = async (
   let absentToday = 0;
   let halfDayToday = 0;
   let leaveToday = 0;
+  let presentToday = 0;
 
+  const todayRecMap = new Map<string, AttendanceRecord>();
   for (const rec of todayRecords) {
-    if (rec.status === 'ABSENT') absentToday++;
-    else if (rec.status === 'HALF_DAY') halfDayToday++;
-    else if (rec.status === 'LEAVE') leaveToday++;
+    todayRecMap.set(rec.userId, rec);
   }
 
-  const presentToday = Math.max(0, employees.length - (absentToday + halfDayToday + leaveToday));
+  for (const emp of employees) {
+    const rec = todayRecMap.get(emp.id);
+    if (rec) {
+      if (rec.status === 'ABSENT') absentToday++;
+      else if (rec.status === 'HALF_DAY') halfDayToday++;
+      else if (rec.status === 'LEAVE') leaveToday++;
+      else if (rec.status === 'PRESENT') presentToday++;
+    } else {
+      if (emp.shiftType === 'HALF_DAY') halfDayToday++;
+      else presentToday++;
+    }
+  }
 
   return {
     year,
@@ -286,24 +328,52 @@ export const getEmployeeMonthlyAttendance = async (
     orderBy: { date: 'asc' },
   });
 
+  const recByDate = new Map<string, AttendanceRecord>();
+  for (const rec of records) {
+    recByDate.set(formatDateToISO(rec.date), rec);
+  }
+
   let absentDays = 0;
   let halfDays = 0;
   let leaveDays = 0;
+  let presentDays = 0;
+  let totalWorkUnits = 0;
 
-  for (const rec of records) {
-    if (isWorkingDay(rec.date)) {
-      if (rec.status === 'ABSENT') absentDays++;
-      else if (rec.status === 'HALF_DAY') halfDays++;
-      else if (rec.status === 'LEAVE') leaveDays++;
+  const totalDaysInMonth = getDaysInMonth(year, month);
+  for (let day = 1; day <= totalDaysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const rec = recByDate.get(dateStr);
+
+    if (rec) {
+      if (rec.status === 'ABSENT') {
+        absentDays++;
+      } else if (rec.status === 'LEAVE') {
+        leaveDays++;
+      } else if (rec.status === 'HALF_DAY') {
+        halfDays++;
+        totalWorkUnits += rec.workUnits !== null && rec.workUnits !== undefined ? Number(rec.workUnits) : 1;
+      } else if (rec.status === 'PRESENT') {
+        presentDays++;
+        totalWorkUnits += rec.workUnits !== null && rec.workUnits !== undefined ? Number(rec.workUnits) : 2;
+      }
+    } else {
+      if (user.shiftType === 'HALF_DAY') {
+        halfDays++;
+        totalWorkUnits += 1;
+      } else {
+        presentDays++;
+        totalWorkUnits += 2;
+      }
     }
   }
 
-  const presentDays = Math.max(0, workingDays - (absentDays + halfDays + leaveDays));
   const salaryResult = calculateSalary({
     monthlySalary: user.monthlySalary !== null && user.monthlySalary !== undefined ? Number(user.monthlySalary) : null,
     workingDays,
     presentDays,
     halfDays,
+    shiftType: user.shiftType,
+    totalWorkUnits,
   });
 
   const serializedRecords: SerializedAttendanceRecord[] = records.map((r) => ({
@@ -311,6 +381,7 @@ export const getEmployeeMonthlyAttendance = async (
     userId: r.userId,
     date: formatDateToISO(r.date),
     status: r.status,
+    workUnits: r.workUnits !== null && r.workUnits !== undefined ? Number(r.workUnits) : null,
     notes: r.notes,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -318,6 +389,7 @@ export const getEmployeeMonthlyAttendance = async (
 
   return {
     user: toPublicUser(user),
+    shiftType: user.shiftType,
     year,
     month,
     workingDays,
@@ -347,8 +419,14 @@ export const createOrUpdateAttendance = async (
 
   const dateUtc = parseDateStringToUTC(input.date);
 
-  // If status is PRESENT, remove any exception record to preserve present-by-default architecture
-  if (input.status === 'PRESENT') {
+  // If status is PRESENT without explicit workUnits, without notes, and user is FULL_DAY,
+  // delete any existing exception to restore present-by-default architecture (preserves test 11).
+  if (
+    input.status === 'PRESENT' &&
+    input.workUnits === undefined &&
+    !input.notes &&
+    user.shiftType === 'FULL_DAY'
+  ) {
     await db.attendanceRecord.deleteMany({
       where: {
         userId: input.userId,
@@ -363,6 +441,17 @@ export const createOrUpdateAttendance = async (
     };
   }
 
+  let workUnitsVal: number | null = null;
+  if (input.workUnits !== undefined && input.workUnits !== null) {
+    workUnitsVal = Number(input.workUnits);
+  } else if (input.status === 'PRESENT') {
+    workUnitsVal = 2;
+  } else if (input.status === 'HALF_DAY') {
+    workUnitsVal = 1;
+  } else {
+    workUnitsVal = 0;
+  }
+
   const record = await db.attendanceRecord.upsert({
     where: {
       userId_date: {
@@ -372,12 +461,14 @@ export const createOrUpdateAttendance = async (
     },
     update: {
       status: input.status,
+      workUnits: workUnitsVal !== null ? new Prisma.Decimal(workUnitsVal) : null,
       notes: input.notes !== undefined ? (input.notes ?? null) : undefined,
     },
     create: {
       userId: input.userId,
       date: dateUtc,
       status: input.status,
+      workUnits: workUnitsVal !== null ? new Prisma.Decimal(workUnitsVal) : null,
       notes: input.notes ?? null,
     },
   });
@@ -389,6 +480,7 @@ export const createOrUpdateAttendance = async (
       userId: record.userId,
       date: formatDateToISO(record.date),
       status: record.status,
+      workUnits: record.workUnits !== null && record.workUnits !== undefined ? Number(record.workUnits) : null,
       notes: record.notes,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -410,22 +502,22 @@ export const patchAttendance = async (
     throw new AppError(404, 'ATTENDANCE_RECORD_NOT_FOUND', 'Attendance record not found');
   }
 
-  if (input.status === 'PRESENT') {
-    await db.attendanceRecord.delete({
-      where: { id },
-    });
-
-    return {
-      message: 'Attendance reset to default PRESENT',
-      record: null,
-      status: 'PRESENT',
-    };
+  let workUnitsVal: number | undefined | null = undefined;
+  if (input.workUnits !== undefined) {
+    workUnitsVal = input.workUnits !== null ? Number(input.workUnits) : null;
+  } else if (input.status === 'PRESENT') {
+    workUnitsVal = 2;
+  } else if (input.status === 'HALF_DAY') {
+    workUnitsVal = 1;
+  } else if (input.status === 'ABSENT' || input.status === 'LEAVE') {
+    workUnitsVal = 0;
   }
 
   const updated = await db.attendanceRecord.update({
     where: { id },
     data: {
       status: input.status !== undefined ? input.status : undefined,
+      workUnits: workUnitsVal !== undefined ? (workUnitsVal !== null ? new Prisma.Decimal(workUnitsVal) : null) : undefined,
       notes: input.notes !== undefined ? (input.notes ?? null) : undefined,
     },
   });
@@ -437,6 +529,7 @@ export const patchAttendance = async (
       userId: updated.userId,
       date: formatDateToISO(updated.date),
       status: updated.status,
+      workUnits: updated.workUnits !== null && updated.workUnits !== undefined ? Number(updated.workUnits) : null,
       notes: updated.notes,
       createdAt: updated.createdAt,
       updatedAt: updated.updatedAt,

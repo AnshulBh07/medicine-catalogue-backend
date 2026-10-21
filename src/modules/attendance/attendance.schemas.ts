@@ -1,4 +1,4 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
 
 const attendanceStatusSchema = z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE']);
 
@@ -19,11 +19,13 @@ export const createOrUpdateAttendanceSchema = z.object({
   userId: z.string().uuid(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
   status: attendanceStatusSchema,
+  workUnits: z.coerce.number().min(0).max(10).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
 });
 
 export const patchAttendanceSchema = z.object({
   status: attendanceStatusSchema.optional(),
+  workUnits: z.coerce.number().min(0).max(10).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
 });
 

@@ -14,6 +14,7 @@ import {
 import { mrsRouter } from '../modules/mrs/mr.routes.js';
 import { manufacturersRouter } from '../modules/manufacturers/manufacturer.routes.js';
 import { uploadsRouter } from '../modules/uploads/upload.routes.js';
+import { ocrRouter } from '../modules/ocr/ocr.routes.js';
 import { attendanceRouter } from '../modules/attendance/attendance.routes.js';
 import { shortagesRouter } from '../modules/shortages/shortage.routes.js';
 import { dealsRouter } from '../modules/deals/deal.routes.js';
@@ -39,6 +40,7 @@ router.use('/medicines', commercialDetailsRouter);
 router.use('/mrs', mrsRouter);
 router.use('/manufacturers', manufacturersRouter);
 router.use('/uploads', uploadsRouter);
+router.use('/ocr', ocrRouter);
 
 router.get('/health', async (_request, response) => {
   try {
