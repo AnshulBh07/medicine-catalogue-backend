@@ -61,47 +61,116 @@ const KNOWN_DOSAGE_FORMS: Record<string, string> = {
   inhaler: 'INHALER',
 };
 
+const PACK_UNIT_MAP: Record<string, string> = {
+  tablet: 'TABLET',
+  tablets: 'TABLET',
+  tab: 'TABLET',
+  tabs: 'TABLET',
+  capsule: 'CAPSULE',
+  capsules: 'CAPSULE',
+  cap: 'CAPSULE',
+  caps: 'CAPSULE',
+  ml: 'ML',
+  g: 'G',
+  gm: 'G',
+  gram: 'G',
+  grams: 'G',
+  vial: 'VIAL',
+  vials: 'VIAL',
+  bottle: 'BOTTLE',
+  bottles: 'BOTTLE',
+  sachet: 'SACHET',
+  sachets: 'SACHET',
+  strip: 'STRIP',
+  strips: 'STRIP',
+  ampule: 'AMPULE',
+  ampules: 'AMPULE',
+  ampoule: 'AMPULE',
+  ampoules: 'AMPULE',
+  piece: 'PIECE',
+  pieces: 'PIECE',
+  unit: 'PIECE',
+  units: 'PIECE',
+};
+
 function getLastDayOfMonth(year: number, month: number): number {
-  return new Date(year, month, 0).getDate();
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function normalizeParsedYear(rawYear: number): number {
+  if (rawYear < 100) {
+    return rawYear < 50 ? 2000 + rawYear : 1900 + rawYear;
+  }
+  return rawYear;
+}
+
+function formatValidatedDate(year: number, month: number, day: number): string | undefined {
+  if (year < 1990 || year > 2050 || month < 1 || month > 12) {
+    return undefined;
+  }
+  const maxDay = getLastDayOfMonth(year, month);
+  if (day < 1 || day > maxDay) {
+    return undefined;
+  }
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 export function parseDateString(rawDate: string, isExpiry = false): string | undefined {
   const cleaned = rawDate.trim().replace(/[.,;:]/g, ' ').replace(/\s+/g, ' ');
+  if (!cleaned) return undefined;
 
-  // Match MM/YYYY or MM-YYYY or MM YYYY
-  const numMatch = cleaned.match(/(\d{1,2})[\s/-]+(\d{2,4})/);
-  if (numMatch && numMatch[1] && numMatch[2]) {
-    let month = parseInt(numMatch[1], 10);
-    let year = parseInt(numMatch[2], 10);
+  // 1. Match ISO YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = cleaned.match(/\b(\d{4})[\s/-]+(\d{1,2})[\s/-]+(\d{1,2})\b/);
+  if (isoMatch && isoMatch[1] && isoMatch[2] && isoMatch[3]) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    return formatValidatedDate(year, month, day);
+  }
 
-    if (year < 100) {
-      year += year < 50 ? 2000 : 1900;
-    }
+  // 2. Match full DD/MM/YYYY, DD-MM-YYYY, or DD/MM/YY (must run BEFORE MM/YYYY!)
+  const dmyMatch = cleaned.match(/\b(\d{1,2})[\s/-]+(\d{1,2})[\s/-]+(\d{2,4})\b/);
+  if (dmyMatch && dmyMatch[1] && dmyMatch[2] && dmyMatch[3]) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10);
+    const year = normalizeParsedYear(parseInt(dmyMatch[3], 10));
+    return formatValidatedDate(year, month, day);
+  }
 
-    if (month >= 1 && month <= 12 && year >= 1990 && year <= 2050) {
-      const monthStr = String(month).padStart(2, '0');
-      const day = isExpiry ? getLastDayOfMonth(year, month) : 1;
-      const dayStr = String(day).padStart(2, '0');
-      return `${year}-${monthStr}-${dayStr}`;
+  // 3. Match DD Mon YYYY (e.g. 15 Mar 2026)
+  const dayAlphaMatch = cleaned.match(/\b(\d{1,2})[\s/-]+([a-zA-Z]{3,9})[\s/-]+(\d{2,4})\b/);
+  if (dayAlphaMatch && dayAlphaMatch[1] && dayAlphaMatch[2] && dayAlphaMatch[3]) {
+    const monthKey = dayAlphaMatch[2].toLowerCase().slice(0, 3);
+    const monthNumStr = MONTH_MAP[monthKey];
+    if (monthNumStr) {
+      const day = parseInt(dayAlphaMatch[1], 10);
+      const month = parseInt(monthNumStr, 10);
+      const year = normalizeParsedYear(parseInt(dayAlphaMatch[3], 10));
+      return formatValidatedDate(year, month, day);
     }
   }
 
-  // Match Mon YYYY (e.g. Mar 2024 or MAR.2024)
-  const alphaMatch = cleaned.match(/([a-zA-Z]{3,9})[\s/-]+(\d{2,4})/);
+  // 4. Match Mon YYYY (e.g. Mar 2024 or MAR.2024)
+  const alphaMatch = cleaned.match(/\b([a-zA-Z]{3,9})[\s/-]+(\d{2,4})\b/);
   if (alphaMatch && alphaMatch[1] && alphaMatch[2]) {
     const monthKey = alphaMatch[1].toLowerCase().slice(0, 3);
     const monthNumStr = MONTH_MAP[monthKey];
     if (monthNumStr) {
       const month = parseInt(monthNumStr, 10);
-      let year = parseInt(alphaMatch[2], 10);
-      if (year < 100) {
-        year += year < 50 ? 2000 : 1900;
-      }
-      if (year >= 1990 && year <= 2050) {
-        const day = isExpiry ? getLastDayOfMonth(year, month) : 1;
-        const dayStr = String(day).padStart(2, '0');
-        return `${year}-${monthNumStr}-${dayStr}`;
-      }
+      const year = normalizeParsedYear(parseInt(alphaMatch[2], 10));
+      const day = isExpiry ? getLastDayOfMonth(year, month) : 1;
+      return formatValidatedDate(year, month, day);
+    }
+  }
+
+  // 5. Match MM/YYYY or MM-YYYY or MM YYYY (only when not part of a 3-part date)
+  const numMatch = cleaned.match(/(?:^|[^\d])(\d{1,2})[\s/-]+(\d{2,4})(?:$|[^\d])/);
+  if (numMatch && numMatch[1] && numMatch[2]) {
+    const month = parseInt(numMatch[1], 10);
+    const year = normalizeParsedYear(parseInt(numMatch[2], 10));
+    if (month >= 1 && month <= 12) {
+      const day = isExpiry ? getLastDayOfMonth(year, month) : 1;
+      return formatValidatedDate(year, month, day);
     }
   }
 
@@ -212,59 +281,58 @@ export function parseMedicinePackagingText(rawText: string): ExtractedMedicineDa
     // 7. Pack Quantity & Pack Unit
     if (!result.packQuantity) {
       const packMatch = line.match(
-        /(?:strip\s*of\s*|pack\s*of\s*)?(\d{1,4})\s*(tablets?|capsules?|vials?|bottles?|sachets?|ampoules?|ml|g|gm)/i,
+        /(?:(?:strip|pack|box|bottle)\s*of\s*|(?:^|[^\d.]))(\d{1,4})\s*(tablets?|tabs?|capsules?|caps?|vials?|bottles?|sachets?|strips?|ampoules?|ampules?|pieces?|units?|ml|gm|grams?|g)\b/i,
       );
-      if (packMatch && packMatch[1] && packMatch[2] && !/contains|each|mg\b/i.test(line)) {
+      if (packMatch && packMatch[1] && packMatch[2] && !/contains|each|mg\b|mcg\b|iu\b|%/i.test(line)) {
         result.packQuantity = packMatch[1];
         const rawUnit = packMatch[2].toLowerCase();
-        for (const [k, v] of Object.entries(KNOWN_DOSAGE_FORMS)) {
-          if (rawUnit.startsWith(k)) {
-            result.packUnit = v;
-            break;
-          }
-        }
-        if (!result.packUnit) {
-          result.packUnit = rawUnit.toUpperCase();
-        }
+        result.packUnit = PACK_UNIT_MAP[rawUnit] ?? 'TABLET';
       }
     }
 
-    // 8. Salts / Active Ingredients
-    // Check if line specifies an equivalent to pattern: "equivalent to <Salt> <Amount> <Unit>"
-    const equivMatch = line.match(
-      /(?:equivalent\s*to\s*)([a-zA-Z\s]+?)\s*(?:ip|bp|usp)?\s*(\d+(?:\.\d+)?)\s*(mg|g|mcg|ml|%|iu)\b/i,
-    );
+    // 8. Salts / Active Ingredients (supports multiple salts on one line separated by +, &, "and", or ",")
+    if (!/dose|warning|keep|store|exp|mrp|mfd|batch/i.test(line)) {
+      const segments = line.split(/\s*(?:\+|&|,|\band\b)\s*/i);
+      for (const segment of segments) {
+        const trimmedSegment = segment.trim();
+        if (!trimmedSegment) continue;
 
-    const standardSaltMatch = !equivMatch
-      ? line.match(
-          /([a-zA-Z\s]+?)\s*(?:ip|bp|usp)?\s*(?:tablets?|capsules?)?\s*(\d+(?:\.\d+)?)\s*(mg|g|mcg|ml|%|iu)\b/i,
-        )
-      : null;
-
-    const saltMatch = equivMatch || standardSaltMatch;
-
-    if (saltMatch && saltMatch[1] && saltMatch[2] && saltMatch[3] && !/dose|warning|keep|store|exp|mrp|mfd|batch/i.test(line)) {
-      let rawName = saltMatch[1]
-        .replace(/^(?:each|uncoated|film\s*coated|tablet|capsule|contains|and)\s+/i, '')
-        .replace(/\b(?:tablets?|capsules?|syrup|suspension|drops|liquid|ip|bp|usp|trihydrate|hydrochloride|diluted)\b/gi, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      const amount = saltMatch[2];
-      const unit = saltMatch[3].toUpperCase();
-
-      if (rawName.length >= 3 && !/^(the|and|for|with)$/i.test(rawName)) {
-        const matchedSalt = COMMON_SALTS.find(
-          (s) =>
-            s.toLowerCase() === rawName.toLowerCase() ||
-            rawName.toLowerCase().includes(s.toLowerCase()) ||
-            s.toLowerCase().includes(rawName.toLowerCase()),
+        const equivMatch = trimmedSegment.match(
+          /(?:equivalent\s*to\s*)([a-zA-Z\s-]+?)\s*(?:ip|bp|usp)?\s*(\d+(?:\.\d+)?)\s*(mg|gm|g|mcg|ml|%|iu)(?:\b|(?=\s|$))/i,
         );
-        extractedSalts.push({
-          name: matchedSalt ?? rawName,
-          amount,
-          unit: unit === 'GM' ? 'G' : unit,
-        });
+
+        const standardSaltMatch = !equivMatch
+          ? trimmedSegment.match(
+              /([a-zA-Z\s-]+?)\s*(?:ip|bp|usp)?\s*(?:tablets?|capsules?)?\s*(\d+(?:\.\d+)?)\s*(mg|gm|g|mcg|ml|%|iu)(?:\b|(?=\s|$))/i,
+            )
+          : null;
+
+        const saltMatch = equivMatch || standardSaltMatch;
+        if (saltMatch && saltMatch[1] && saltMatch[2] && saltMatch[3]) {
+          const rawName = saltMatch[1]
+            .replace(/^(?:each|uncoated|film\s*coated|tablet|capsule|contains|composition|and)\s+/gi, '')
+            .replace(/\b(?:tablets?|capsules?|syrup|suspension|drops|liquid|ip|bp|usp|trihydrate|hydrochloride|diluted)\b/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          const amount = saltMatch[2];
+          const rawUnit = saltMatch[3].toUpperCase();
+          const unit = rawUnit === '%' ? 'PERCENT' : rawUnit === 'GM' ? 'G' : rawUnit;
+
+          if (rawName.length >= 3 && !/^(the|and|for|with)$/i.test(rawName)) {
+            const rawLower = rawName.toLowerCase();
+            // Match exact known salt or when raw text contains the full known salt name
+            const matchedSalt = COMMON_SALTS.find((s) => {
+              const knownLower = s.toLowerCase();
+              return rawLower === knownLower || rawLower.includes(knownLower);
+            });
+            extractedSalts.push({
+              name: matchedSalt ?? rawName,
+              amount,
+              unit,
+            });
+          }
+        }
       }
     }
   }

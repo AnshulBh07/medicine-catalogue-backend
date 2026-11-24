@@ -267,6 +267,7 @@ export const medicineIdSchema = z.object({
 export const medicineSortFieldSchema = z.enum([
   'name',
   'mrp',
+  'margin',
   'packQuantity',
   'createdAt',
   'updatedAt',

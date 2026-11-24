@@ -1,7 +1,6 @@
 import {
   parseMedicinePackagingText,
   type ExtractedMedicineData,
-  type ExtractedSalt,
 } from './ocr.parser.js';
 import type { ScanMedicinePhotoItem } from './ocr.schemas.js';
 
@@ -18,16 +17,49 @@ export interface ScanMedicineResult {
   fieldsExtractedCount: number;
 }
 
+function isBinaryImagePayload(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  // JPEG (FF D8 FF), PNG (89 50 4E 47), GIF (47 49 46 38), BMP (42 4D), WebP (RIFF....WEBP)
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return true;
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return true;
+  if (
+    buf.length >= 12 &&
+    buf[0] === 0x52 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x46 &&
+    buf[8] === 0x57 &&
+    buf[9] === 0x45 &&
+    buf[10] === 0x42 &&
+    buf[11] === 0x50
+  ) {
+    return true;
+  }
+  if (buf.includes(0)) return true;
+  return false;
+}
+
 function extractTextFromPhotoItem(item: ScanMedicinePhotoItem): string {
   if (item.text && item.text.trim()) {
     return item.text.trim();
   }
 
   if (item.base64) {
-    // If base64 contains embedded raw text header or simulated packaging metadata
+    // Reject raw binary image payloads (F-003 OCR engine is tracked separately) instead of
+    // feeding decoded binary garbage into regex text parsing.
     try {
-      const decoded = Buffer.from(item.base64, 'base64').toString('utf-8');
-      if (decoded && /[a-zA-Z0-9]/.test(decoded)) {
+      const cleanedBase64 = item.base64.trim().replace(/^data:[^;]+;base64,/, '');
+      const buf = Buffer.from(cleanedBase64, 'base64');
+      if (buf.length === 0 || isBinaryImagePayload(buf)) {
+        return '';
+      }
+      const decoded = buf.toString('utf-8');
+      if (decoded.includes('\uFFFD')) {
+        return '';
+      }
+      if (decoded && /[a-zA-Z0-9]/.test(decoded) && /^[\t\n\r -~₹°\u00A0-\u024F]+$/.test(decoded)) {
         return decoded;
       }
     } catch {
@@ -134,6 +166,18 @@ export function mergeExtractedData(
           values: distinctVals,
           message: `Conflicting Batch Numbers detected across photos: ${distinctVals.join(' vs ')}`,
         });
+      } else if (field === 'name' || field === 'manufacturer' || field === 'form' || field === 'packQuantity') {
+        const labelMap: Record<string, string> = {
+          name: 'Medicine Name',
+          manufacturer: 'Manufacturer',
+          form: 'Dosage Form',
+          packQuantity: 'Pack Quantity',
+        };
+        conflicts.push({
+          field,
+          values: distinctVals,
+          message: `Conflicting ${labelMap[field]} values detected across photos: ${distinctVals.join(' vs ')}`,
+        });
       }
     }
   }
@@ -163,6 +207,8 @@ export async function processMedicinePhotos(
   if (merged.batchNumber) fieldsCount++;
   if (merged.salts && merged.salts.length > 0) fieldsCount++;
   if (merged.form) fieldsCount++;
+  if (merged.packQuantity) fieldsCount++;
+  if (merged.packUnit) fieldsCount++;
 
   return {
     extracted: merged,

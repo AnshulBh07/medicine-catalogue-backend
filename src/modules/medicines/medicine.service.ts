@@ -1,4 +1,5 @@
 import { Prisma, type Batch, type CommercialDetails, type Composition, type CompositionSalt, type Manufacturer, type Medicine, type MR, type User } from '@prisma/client/index';
+import { calculateCommercialMetrics } from '../../common/commercial.utils.js';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
 import { r2StorageService } from '../../services/storage/r2.service.js';
@@ -230,6 +231,26 @@ const getOrderBy = (
   }
 };
 
+const getMedicineMarginPercent = (medicine: MedicineRecord): number | null => {
+  const latestBatch = medicine.batches && medicine.batches.length > 0 ? medicine.batches[0] : null;
+  const comm = latestBatch?.commercialDetails ?? null;
+  if (!comm) {
+    return null;
+  }
+
+  const metrics = calculateCommercialMetrics(
+    Number(comm.purchaseRate),
+    Number(comm.mrp),
+    Number(comm.discountPercent ?? 0),
+    comm.scheme,
+    Number(comm.gstPercent ?? 0),
+  );
+
+  return typeof metrics.marginPercent === 'number' && Number.isFinite(metrics.marginPercent)
+    ? metrics.marginPercent
+    : null;
+};
+
 export const listMedicines = async (
   input: ListMedicinesInput,
   db: MedicineStore = prisma,
@@ -251,27 +272,46 @@ export const listMedicines = async (
     orderBy: getOrderBy(sortBy, sortOrder),
   });
 
-  let publicList = medicines.map(toPublicMedicine);
+  let entries = medicines.map((medicine) => ({
+    medicine: toPublicMedicine(medicine),
+    marginPercent: getMedicineMarginPercent(medicine),
+  }));
 
   if (minPrice !== undefined || maxPrice !== undefined) {
-    publicList = publicList.filter((med) => {
-      if (med.mrp === null) return false;
-      if (minPrice !== undefined && med.mrp < minPrice) return false;
-      if (maxPrice !== undefined && med.mrp > maxPrice) return false;
+    entries = entries.filter(({ medicine }) => {
+      if (medicine.mrp === null) return false;
+      if (minPrice !== undefined && medicine.mrp < minPrice) return false;
+      if (maxPrice !== undefined && medicine.mrp > maxPrice) return false;
       return true;
     });
   }
 
   if (sortBy === 'mrp') {
-    publicList.sort((a, b) => {
-      if (a.mrp === null && b.mrp === null) return 0;
-      if (a.mrp === null) return 1;
-      if (b.mrp === null) return -1;
-      return sortOrder === 'desc' ? b.mrp - a.mrp : a.mrp - b.mrp;
+    entries.sort((a, b) => {
+      if (a.medicine.mrp === null && b.medicine.mrp === null) return 0;
+      if (a.medicine.mrp === null) return 1;
+      if (b.medicine.mrp === null) return -1;
+      return sortOrder === 'desc'
+        ? b.medicine.mrp - a.medicine.mrp
+        : a.medicine.mrp - b.medicine.mrp;
+    });
+  } else if (sortBy === 'margin') {
+    entries.sort((a, b) => {
+      if (a.marginPercent === null && b.marginPercent === null) {
+        return a.medicine.name.localeCompare(b.medicine.name);
+      }
+      if (a.marginPercent === null) return 1;
+      if (b.marginPercent === null) return -1;
+      if (a.marginPercent !== b.marginPercent) {
+        return sortOrder === 'desc'
+          ? b.marginPercent - a.marginPercent
+          : a.marginPercent - b.marginPercent;
+      }
+      return a.medicine.name.localeCompare(b.medicine.name);
     });
   }
 
-  return publicList;
+  return entries.map(({ medicine }) => medicine);
 };
 
 export const getMedicine = async (
