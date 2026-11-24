@@ -130,6 +130,7 @@ export const createUser = async (
         passwordHash,
         role: input.role as $Enums.UserRole,
         monthlySalary: input.monthlySalary !== undefined ? (input.monthlySalary === null ? null : input.monthlySalary) : undefined,
+        shiftType: (input.shiftType ?? 'FULL_DAY') as $Enums.ShiftType,
         active: true,
       },
     });
@@ -190,6 +191,7 @@ export const updateUser = async (
         role: input.role !== undefined ? (input.role as $Enums.UserRole) : undefined,
         active: input.active !== undefined ? input.active : undefined,
         monthlySalary: input.monthlySalary !== undefined ? (input.monthlySalary === null ? null : input.monthlySalary) : undefined,
+        shiftType: input.shiftType !== undefined ? (input.shiftType as $Enums.ShiftType) : undefined,
         passwordHash,
       },
     });

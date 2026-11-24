@@ -67,9 +67,16 @@ export const calculateSalary = (input: SalaryCalculationInput): SalaryCalculatio
       ? input.totalWorkUnits
       : presentDays * 2 + halfDays * 1;
 
-  const payableDays = totalWorkUnits / 2;
+  // Expected units per scheduled working day:
+  // - HALF_DAY employee: 1 unit per scheduled day (30 working days = 30 expected units)
+  // - FULL_DAY employee: 2 units per scheduled day (30 working days = 60 expected units)
+  const expectedUnitsPerDay = shiftType === 'HALF_DAY' ? 1 : 2;
+  const expectedWorkUnits = workingDays * expectedUnitsPerDay;
+
+  // payableDays represents scheduled payable shift-days relative to the employee's shift type
+  const payableDays = Number((totalWorkUnits / expectedUnitsPerDay).toFixed(2));
   const attendancePercentage =
-    workingDays > 0 ? Number(((presentDays / workingDays) * 100).toFixed(1)) : 100;
+    expectedWorkUnits > 0 ? Number(((totalWorkUnits / expectedWorkUnits) * 100).toFixed(1)) : 100;
 
   if (workingDays <= 0 || salary <= 0) {
     return {

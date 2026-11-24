@@ -50,19 +50,24 @@ export const commercialDetailsBatchIdSchema = z.object({
   batchId: z.string().uuid(),
 });
 
-const commercialDetailsFields = {
+const commercialDetailsBaseFields = {
   purchaseRate: money,
   mrp: money,
   discountPercent,
-  gstPercent: gstPercent.optional().default(0),
+  gstPercent,
   scheme: jsonValue.nullable().optional(),
   privateNotes: z.string().trim().nullable().optional(),
 };
 
-export const createCommercialDetailsSchema = z.object(commercialDetailsFields).strict();
+export const createCommercialDetailsSchema = z
+  .object({
+    ...commercialDetailsBaseFields,
+    gstPercent: gstPercent.optional().default(0),
+  })
+  .strict();
 
 export const updateCommercialDetailsSchema = z
-  .object(commercialDetailsFields)
+  .object(commercialDetailsBaseFields)
   .partial()
   .strict()
   .refine((value) => Object.keys(value).length > 0, {

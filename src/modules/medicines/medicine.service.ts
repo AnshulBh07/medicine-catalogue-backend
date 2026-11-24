@@ -246,24 +246,21 @@ export const listMedicines = async (
       ...(input.form ? { form: input.form } : {}),
       ...(input.manufacturerId ? { manufacturerId: input.manufacturerId } : {}),
       ...(input.mrId ? { mrId: input.mrId } : {}),
-      ...(minPrice !== undefined || maxPrice !== undefined
-        ? {
-            batches: {
-              some: {
-                commercialDetails: {
-                  ...(minPrice !== undefined ? { mrp: { gte: minPrice } } : {}),
-                  ...(maxPrice !== undefined ? { mrp: { lte: maxPrice } } : {}),
-                },
-              },
-            },
-          }
-        : {}),
     },
     include: medicineInclude,
     orderBy: getOrderBy(sortBy, sortOrder),
   });
 
-  const publicList = medicines.map(toPublicMedicine);
+  let publicList = medicines.map(toPublicMedicine);
+
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    publicList = publicList.filter((med) => {
+      if (med.mrp === null) return false;
+      if (minPrice !== undefined && med.mrp < minPrice) return false;
+      if (maxPrice !== undefined && med.mrp > maxPrice) return false;
+      return true;
+    });
+  }
 
   if (sortBy === 'mrp') {
     publicList.sort((a, b) => {
@@ -809,7 +806,15 @@ export const updateMedicine = async (
       throw error;
     }
 
-    const commData = input.commercialDetails || (input.mrp !== undefined ? {
+    const hasTopLevelCommercial =
+      input.purchaseRate !== undefined ||
+      input.mrp !== undefined ||
+      input.discountPercent !== undefined ||
+      input.gstPercent !== undefined ||
+      input.scheme !== undefined ||
+      input.privateNotes !== undefined;
+
+    const commData = input.commercialDetails || (hasTopLevelCommercial ? {
       purchaseRate: input.purchaseRate,
       mrp: input.mrp,
       discountPercent: input.discountPercent,

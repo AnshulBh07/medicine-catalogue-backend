@@ -193,14 +193,14 @@ describe('Admin Attendance & Salary Integration Tests', () => {
         });
 
       // Employee 1 now has:
-      // Working days = 31
-      // Absent = 2 (Aug 4, Aug 18)
-      // Half Day = 1 (Aug 6)
-      // Leave = 1 (Aug 10)
-      // Present = 31 - (2 + 1 + 1) = 27
-      // Payable days = 27 + (1 * 0.5) = 27.5
+      // Working days = 31 (62 expected units for FULL_DAY)
+      // Absent = 2 (Aug 4, Aug 18) -> 0 units
+      // Half Day = 1 (Aug 6) -> 1 unit
+      // Leave = 1 (Aug 10) -> 0 units
+      // Present = 31 - (2 + 1 + 1) = 27 -> 54 units
+      // Total work units = 55; Payable days = 55 / 2 = 27.5
       // Estimated salary = 25,000 / 31 * 27.5 = 22,177.419 -> 22,177
-      // Attendance % = 27 / 31 * 100 = 87.1%
+      // Attendance % = 55 / 62 * 100 = 88.7%
 
       const response = await request(app)
         .get(`/api/v1/attendance/users/${employee1Id}?year=2026&month=8`)
@@ -213,7 +213,7 @@ describe('Admin Attendance & Salary Integration Tests', () => {
       expect(response.body.leaveDays).toBe(1);
       expect(response.body.presentDays).toBe(27);
       expect(response.body.payableDays).toBe(27.5);
-      expect(response.body.attendancePercentage).toBe(87.1);
+      expect(response.body.attendancePercentage).toBe(88.7);
       expect(response.body.estimatedSalary).toBe(22177);
       expect(response.body.records.length).toBe(4);
     });
@@ -237,7 +237,7 @@ describe('Admin Attendance & Salary Integration Tests', () => {
       // Leave: 0
       // Payable days: 28.5
       // Estimated salary: ₹25,000 / 31 * 28.5 = ₹22,984
-      // Attendance %: (28 / 31) * 100 = 90.3%
+      // Attendance %: (57 / 62) * 100 = 91.9%
 
       const response = await request(app)
         .get(`/api/v1/attendance/users/${employee1Id}?year=2026&month=8`)
@@ -250,7 +250,7 @@ describe('Admin Attendance & Salary Integration Tests', () => {
       expect(response.body.halfDays).toBe(1);
       expect(response.body.leaveDays).toBe(0);
       expect(response.body.payableDays).toBe(28.5);
-      expect(response.body.attendancePercentage).toBe(90.3);
+      expect(response.body.attendancePercentage).toBe(91.9);
       expect(response.body.estimatedSalary).toBe(22984);
     });
 

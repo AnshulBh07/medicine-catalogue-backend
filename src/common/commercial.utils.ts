@@ -62,47 +62,96 @@ export interface CommercialMetrics {
   formattedEffectivePurchaseRate?: string;
 }
 
+const toNonNegativeFinite = (value: unknown): number => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  return num;
+};
+
+const normalizeZero = (value: number): number => {
+  if (!Number.isFinite(value) || Object.is(value, -0)) return 0;
+  return value;
+};
+
+const roundTo = (value: number, decimals = 2): number => {
+  if (!Number.isFinite(value)) return 0;
+  const factor = 10 ** decimals;
+  const rounded = Math.round((value + Number.EPSILON) * factor) / factor;
+  return Object.is(rounded, -0) ? 0 : rounded;
+};
+
 /**
- * Parses scheme formats such as "10+2", "10 + 2", "Buy 10 Get 2 Free", "10+1"
+ * Parses scheme formats such as "10+2", "10 + 2", "10+2 Free", "Buy 10 Get 2 Free",
+ * structured objects ({ buy, free }, { baseQuantity, freeQuantity }, { description/text/scheme/value }),
+ * and JSON-stringified scheme objects.
  * Returns { buy: number, free: number } or null if not applicable.
  */
 export function parseSchemeQuantities(scheme: unknown): { buy: number; free: number } | null {
   if (!scheme) return null;
 
+  if (typeof scheme === 'string') {
+    const trimmed = scheme.trim();
+    if (!trimmed) return null;
+
+    // Handle JSON-stringified scheme objects (e.g. '{"description":"10+3"}', '{"buy":10,"free":2}')
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+          return parseSchemeQuantities(parsed);
+        }
+      } catch {
+        // Not valid JSON, continue with string parsing
+      }
+    }
+
+    // Match "10+2", "10 + 2", "10+2 Free", "10+2 free strips", "10+1 bonus"
+    const plusMatch = trimmed.match(
+      /^(\d+)\s*\+\s*(\d+)(?:\s+(?:free|bonus|extra|strips?|units?|pcs?|packs?|bottles?|boxes?|tablets?|capsules?)[\w\s]*)?$/i,
+    );
+    if (plusMatch && plusMatch[1] && plusMatch[2]) {
+      const buy = parseInt(plusMatch[1], 10);
+      const free = parseInt(plusMatch[2], 10);
+      if (buy > 0 && free >= 0) return { buy, free };
+    }
+
+    // Match "Buy 10 Get 2 Free" or "Buy 10 get 2"
+    const buyGetMatch = trimmed.match(/buy\s+(\d+)\s+get\s+(\d+)/i);
+    if (buyGetMatch && buyGetMatch[1] && buyGetMatch[2]) {
+      const buy = parseInt(buyGetMatch[1], 10);
+      const free = parseInt(buyGetMatch[2], 10);
+      if (buy > 0 && free >= 0) return { buy, free };
+    }
+
+    return null;
+  }
+
   if (typeof scheme === 'object') {
     const obj = scheme as Record<string, unknown>;
-    if (typeof obj.buy === 'number' && typeof obj.free === 'number' && obj.buy > 0 && obj.free >= 0) {
-      return { buy: obj.buy, free: obj.free };
+    const rawBuy = obj.buy !== undefined ? Number(obj.buy) : NaN;
+    const rawFree = obj.free !== undefined ? Number(obj.free) : NaN;
+    if (Number.isFinite(rawBuy) && Number.isFinite(rawFree) && rawBuy > 0 && rawFree >= 0) {
+      return { buy: rawBuy, free: rawFree };
     }
-    if (typeof obj.baseQuantity === 'number' && typeof obj.freeQuantity === 'number' && obj.baseQuantity > 0 && obj.freeQuantity >= 0) {
-      return { buy: obj.baseQuantity, free: obj.freeQuantity };
+
+    const rawBase = obj.baseQuantity !== undefined ? Number(obj.baseQuantity) : NaN;
+    const rawFreeQty = obj.freeQuantity !== undefined ? Number(obj.freeQuantity) : NaN;
+    if (Number.isFinite(rawBase) && Number.isFinite(rawFreeQty) && rawBase > 0 && rawFreeQty >= 0) {
+      return { buy: rawBase, free: rawFreeQty };
     }
+
     if (typeof obj.description === 'string') {
       return parseSchemeQuantities(obj.description);
     }
     if (typeof obj.text === 'string') {
       return parseSchemeQuantities(obj.text);
     }
+    if (typeof obj.scheme === 'string') {
+      return parseSchemeQuantities(obj.scheme);
+    }
     if (typeof obj.value === 'string') {
       return parseSchemeQuantities(obj.value);
     }
-  }
-
-  const str = String(scheme).trim();
-  // Match "10+2", "10 + 2", "10+1"
-  const plusMatch = str.match(/^(\d+)\s*\+\s*(\d+)$/);
-  if (plusMatch && plusMatch[1] && plusMatch[2]) {
-    const buy = parseInt(plusMatch[1], 10);
-    const free = parseInt(plusMatch[2], 10);
-    if (buy > 0) return { buy, free };
-  }
-
-  // Match "Buy 10 Get 2 Free" or "Buy 10 get 2"
-  const buyGetMatch = str.match(/buy\s+(\d+)\s+get\s+(\d+)/i);
-  if (buyGetMatch && buyGetMatch[1] && buyGetMatch[2]) {
-    const buy = parseInt(buyGetMatch[1], 10);
-    const free = parseInt(buyGetMatch[2], 10);
-    if (buy > 0) return { buy, free };
   }
 
   return null;
@@ -122,6 +171,8 @@ export function parseSchemeQuantities(scheme: unknown): { buy: number; free: num
  * Step 4: sellingValue = sellableQuantity * MRP
  * Step 5: profit = sellingValue - purchaseCost
  * Step 6: marginPercent = (profit / sellingValue) * 100
+ * Step 7: effectivePurchaseRate = purchaseCost / sellableQuantity
+ * Step 8: markupPercent = ((MRP - effectivePurchaseRate) / effectivePurchaseRate) * 100
  */
 export function calculateCommercialMetrics(
   purchaseRate: number,
@@ -130,16 +181,16 @@ export function calculateCommercialMetrics(
   scheme?: unknown,
   gstPercent: number = 0,
 ): CommercialMetrics {
-  const pRate = Number(purchaseRate) || 0;
-  const maxPrice = Number(mrp) || 0;
-  const discount = Number(discountPercent) || 0;
-  const gst = Number(gstPercent) || 0;
+  const pRate = toNonNegativeFinite(purchaseRate);
+  const maxPrice = toNonNegativeFinite(mrp);
+  const discount = Math.min(toNonNegativeFinite(discountPercent), 100);
+  const gst = toNonNegativeFinite(gstPercent);
 
   // Step 1: Apply the supplier/trade discount to the purchase rate
-  const discountedPurchaseRate = pRate * (1 - Math.min(Math.max(discount, 0), 100) / 100);
+  const discountedPurchaseRate = pRate * (1 - discount / 100);
 
   // Step 2: Apply GST to the discounted purchase rate
-  const purchaseRateWithGst = discountedPurchaseRate * (1 + Math.max(gst, 0) / 100);
+  const purchaseRateWithGst = discountedPurchaseRate * (1 + gst / 100);
 
   // Scheme handling:
   // For a 10+3 scheme: purchased = 10, free = 3, sellable = 13
@@ -150,22 +201,26 @@ export function calculateCommercialMetrics(
   const sellableQuantity = purchasedQuantity + freeQuantity;
 
   // Step 3: Calculate actual purchase cost (only for paid/purchased quantity)
-  const purchaseCost = purchasedQuantity * purchaseRateWithGst;
+  const purchaseCost = normalizeZero(purchasedQuantity * purchaseRateWithGst);
 
   // Step 4: Calculate total selling value using all sellable strips
-  const sellingValue = sellableQuantity * maxPrice;
+  const sellingValue = normalizeZero(sellableQuantity * maxPrice);
 
   // Step 5: Calculate profit
-  const profit = sellingValue - purchaseCost;
+  const profit = normalizeZero(sellingValue - purchaseCost);
 
   // Step 6: Calculate margin
-  const marginPercent = sellingValue > 0 ? (profit / sellingValue) * 100 : 0;
+  const marginPercent = sellingValue > 0 ? normalizeZero((profit / sellingValue) * 100) : 0;
 
   // Effective purchase rate per sellable unit
-  const effectivePurchaseRate = sellableQuantity > 0 ? purchaseCost / sellableQuantity : 0;
-  const profitPerUnit = sellableQuantity > 0 ? profit / sellableQuantity : 0;
+  const effectivePurchaseRate = sellableQuantity > 0 ? normalizeZero(purchaseCost / sellableQuantity) : 0;
+  const profitPerUnit = sellableQuantity > 0 ? normalizeZero(profit / sellableQuantity) : 0;
 
-  const markupPercent = pRate > 0 ? ((maxPrice - pRate) / pRate) * 100 : 0;
+  // Markup based on effective purchase rate (incorporating discount, GST, and free-quantity scheme)
+  const markupPercent =
+    effectivePurchaseRate > 0
+      ? normalizeZero(((maxPrice - effectivePurchaseRate) / effectivePurchaseRate) * 100)
+      : 0;
   const isProfit = profit >= 0;
 
   return {
@@ -181,9 +236,9 @@ export function calculateCommercialMetrics(
     purchasedQuantity,
     freeQuantity,
     sellableQuantity,
-    formattedSellingPrice: `₹${maxPrice.toFixed(2)}`,
-    formattedProfit: `₹${profitPerUnit.toFixed(2)}`,
-    formattedMargin: `${marginPercent.toFixed(2)}%`,
-    formattedEffectivePurchaseRate: `₹${effectivePurchaseRate.toFixed(2)}`,
+    formattedSellingPrice: `₹${roundTo(maxPrice, 2).toFixed(2)}`,
+    formattedProfit: `₹${roundTo(profitPerUnit, 2).toFixed(2)}`,
+    formattedMargin: `${roundTo(marginPercent, 2).toFixed(2)}%`,
+    formattedEffectivePurchaseRate: `₹${roundTo(effectivePurchaseRate, 2).toFixed(2)}`,
   };
 }

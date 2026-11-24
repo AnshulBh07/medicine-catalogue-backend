@@ -231,7 +231,15 @@ export const updateBatch = async (
   const expiryDate = input.expiryDate ?? existing.expiryDate;
   ensureDateOrder(manufacturingDate, expiryDate);
 
-  const commData = input.commercialDetails || (input.mrp !== undefined ? {
+  const hasTopLevelCommercial =
+    input.purchaseRate !== undefined ||
+    input.mrp !== undefined ||
+    input.discountPercent !== undefined ||
+    input.gstPercent !== undefined ||
+    input.scheme !== undefined ||
+    input.privateNotes !== undefined;
+
+  const commData = input.commercialDetails || (hasTopLevelCommercial ? {
     purchaseRate: input.purchaseRate,
     mrp: input.mrp,
     discountPercent: input.discountPercent,

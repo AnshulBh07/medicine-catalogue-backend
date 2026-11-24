@@ -108,6 +108,15 @@ export const commercialDetailsNestedSchema = z.object({
   privateNotes: optionalText(100000),
 }).strict();
 
+export const updateCommercialDetailsNestedSchema = z.object({
+  purchaseRate: money.optional(),
+  mrp: money.optional(),
+  discountPercent: discountPercent.optional(),
+  gstPercent: gstPercent.optional(),
+  scheme: jsonValue.nullable().optional(),
+  privateNotes: optionalText(100000),
+}).strict();
+
 export const firstBatchNestedSchema = z.object({
   batchNumber: z.string().trim().min(1).max(100),
   manufacturingDate: dateOnly.nullable().optional(),
@@ -229,7 +238,7 @@ export const updateMedicineSchema = z
     compositionId: z.string().uuid().optional(),
     salts: z.array(saltInputSchema).min(1).optional(),
     compositionSalts: z.array(saltInputSchema).min(1).optional(),
-    commercialDetails: commercialDetailsNestedSchema.optional(),
+    commercialDetails: updateCommercialDetailsNestedSchema.optional(),
     purchaseRate: money.optional(),
     mrp: money.optional(),
     discountPercent: discountPercent.optional(),

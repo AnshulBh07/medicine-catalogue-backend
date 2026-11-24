@@ -77,6 +77,15 @@ export const batchCommercialDetailsSchema = z.object({
   privateNotes: z.string().trim().max(100000).nullable().optional(),
 }).strict();
 
+export const updateBatchCommercialDetailsSchema = z.object({
+  purchaseRate: money.optional(),
+  mrp: money.optional(),
+  discountPercent: discountPercent.optional(),
+  gstPercent: gstPercent.optional(),
+  scheme: jsonValue.nullable().optional(),
+  privateNotes: z.string().trim().max(100000).nullable().optional(),
+}).strict();
+
 export const createBatchSchema = z
   .object({
     medicineId: z.string().uuid(),
@@ -99,7 +108,7 @@ export const updateBatchSchema = z
     batchNumber: batchNumber.optional(),
     manufacturingDate: dateOnly.nullable().optional(),
     expiryDate: dateOnly.optional(),
-    commercialDetails: batchCommercialDetailsSchema.partial().optional(),
+    commercialDetails: updateBatchCommercialDetailsSchema.optional(),
     purchaseRate: money.optional(),
     mrp: money.optional(),
     discountPercent: discountPercent.optional(),

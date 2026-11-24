@@ -144,6 +144,9 @@ export const getMonthlyAttendanceSummary = async (
 
   const totalDaysInMonth = getDaysInMonth(year, month);
 
+  let totalActualWorkUnits = 0;
+  let totalExpectedWorkUnits = 0;
+
   const employeeSummaries: EmployeeMonthlySummary[] = employees.map((emp) => {
     const empRecords = recordsByUser.get(emp.id) || [];
     const recByDate = new Map<string, AttendanceRecord>();
@@ -183,6 +186,10 @@ export const getMonthlyAttendanceSummary = async (
         }
       }
     }
+
+    const expectedUnitsPerDay = emp.shiftType === 'HALF_DAY' ? 1 : 2;
+    totalActualWorkUnits += totalWorkUnits;
+    totalExpectedWorkUnits += workingDays * expectedUnitsPerDay;
 
     const salaryResult = calculateSalary({
       monthlySalary: emp.monthlySalary !== null && emp.monthlySalary !== undefined ? Number(emp.monthlySalary) : null,
@@ -231,7 +238,7 @@ export const getMonthlyAttendanceSummary = async (
   }
 
   const attendancePercentage =
-    totalWorkingDays > 0 ? Number(((totalPresentDays / totalWorkingDays) * 100).toFixed(1)) : 100;
+    totalExpectedWorkUnits > 0 ? Number(((totalActualWorkUnits / totalExpectedWorkUnits) * 100).toFixed(1)) : 100;
   const payablePercentage =
     totalWorkingDays > 0 ? Number(((totalPayableDays / totalWorkingDays) * 100).toFixed(1)) : 100;
 
