@@ -33,6 +33,6 @@ export const validateQuery = (schema: z.ZodType): RequestHandler => (request, _r
     return;
   }
 
-  Object.assign(request.query, result.data);
+  request.validatedQuery = result.data;
   next();
 };

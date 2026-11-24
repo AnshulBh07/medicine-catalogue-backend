@@ -1,3 +1,5 @@
+import { parseDateOnlyToUtc } from '../../common/date.utils.js';
+
 export const getDaysInMonth = (year: number, month: number): number => {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 };
@@ -27,8 +29,7 @@ export const formatDateToISO = (date: Date): string => {
 };
 
 export const parseDateStringToUTC = (dateStr: string): Date => {
-  const [yearStr, monthStr, dayStr] = dateStr.split('-');
-  return new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, Number(dayStr)));
+  return parseDateOnlyToUtc(dateStr);
 };
 
 export const getMonthDateRange = (year: number, month: number): { startDate: Date; endDate: Date } => {

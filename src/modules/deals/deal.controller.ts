@@ -17,7 +17,7 @@ import type {
 } from './deal.schemas.js';
 
 export const listDealsController: RequestHandler = async (request, response) => {
-  const query = request.query as unknown as ListDealsInput;
+  const query = (request.validatedQuery ?? request.query) as unknown as ListDealsInput;
   const result = await listDeals(query);
   response.status(200).json(result);
 };
@@ -28,7 +28,7 @@ export const getDealController: RequestHandler = async (request, response) => {
 };
 
 export const checkPendingDealController: RequestHandler = async (request, response) => {
-  const { medicineId, mrId } = request.query as unknown as CheckPendingDealQuery;
+  const { medicineId, mrId } = (request.validatedQuery ?? request.query) as unknown as CheckPendingDealQuery;
   const result = await checkPendingDeal(medicineId, mrId);
   response.status(200).json(result);
 };

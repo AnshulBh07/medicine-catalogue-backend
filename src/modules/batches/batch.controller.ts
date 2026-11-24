@@ -7,7 +7,7 @@ const isAdminUser = (request: Parameters<RequestHandler>[0]): boolean =>
   request.auth?.role === 'ADMIN';
 
 export const listBatchesController: RequestHandler = async (request, response) => {
-  const input = request.query as unknown as ListBatchesInput;
+  const input = (request.validatedQuery ?? request.query) as unknown as ListBatchesInput;
   const isAdmin = isAdminUser(request);
   if (input.includeInactive && !isAdmin) {
     throw new AppError(403, 'FORBIDDEN', 'You do not have permission to view inactive medicine batches');

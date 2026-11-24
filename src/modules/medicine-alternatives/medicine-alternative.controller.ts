@@ -13,7 +13,7 @@ export const listAlternativesController = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const query = req.query as unknown as ListMedicineAlternativesQueryInput;
+    const query = (req.validatedQuery ?? req.query) as unknown as ListMedicineAlternativesQueryInput;
     const alternatives = await MedicineAlternativeService.listAlternatives(query);
     res.status(200).json({ alternatives });
   } catch (error) {

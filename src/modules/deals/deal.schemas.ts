@@ -45,6 +45,9 @@ const schemeInput = z
   .transform((val) => {
     const formatted = formatScheme(val);
     return formatted === 'None' ? 'None' : formatted;
+  })
+  .refine((val) => val.length <= 100, {
+    message: 'Agreed scheme must not exceed 100 characters',
   });
 
 export const dealIdSchema = z.object({

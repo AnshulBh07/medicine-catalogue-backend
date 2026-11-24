@@ -318,27 +318,20 @@ const resolveManufacturer = async (
       return existing.id;
     }
 
-    try {
-      const created = await tx.manufacturer.create({
-        data: {
-          name: rawName,
-          active: true,
-        },
-        select: { id: true, name: true, active: true },
-      });
-      return created.id;
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        const fallback = await tx.manufacturer.findFirst({
-          where: { name: { equals: rawName, mode: 'insensitive' } },
-          select: { id: true, name: true, active: true },
-        });
-        if (fallback) {
-          if (!fallback.active) throw inactiveReference('manufacturer');
-          return fallback.id;
-        }
-      }
-      throw err;
+    // Use ON CONFLICT DO NOTHING (createMany skipDuplicates) to avoid aborting the PostgreSQL
+    // transaction (SQLSTATE 25P02) on concurrent inserts of the same manufacturer name.
+    await tx.manufacturer.createMany({
+      data: [{ name: rawName, active: true }],
+      skipDuplicates: true,
+    });
+
+    const resolved = await tx.manufacturer.findFirst({
+      where: { name: { equals: rawName, mode: 'insensitive' } },
+      select: { id: true, name: true, active: true },
+    });
+    if (resolved) {
+      if (!resolved.active) throw inactiveReference('manufacturer');
+      return resolved.id;
     }
   }
 
@@ -380,25 +373,16 @@ const resolveCompositionFromSalts = async (
       });
 
       if (!saltRecord) {
-        try {
-          saltRecord = await tx.salt.create({
-            data: {
-              name: rawName,
-              description: null,
-              active: true,
-            },
-            select: { id: true, name: true, active: true },
-          });
-        } catch (err) {
-          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-            saltRecord = await tx.salt.findFirst({
-              where: { name: { equals: rawName, mode: 'insensitive' } },
-              select: { id: true, name: true, active: true },
-            });
-          } else {
-            throw err;
-          }
-        }
+        // Use ON CONFLICT DO NOTHING (createMany skipDuplicates) to avoid aborting the PostgreSQL
+        // transaction (SQLSTATE 25P02) on concurrent inserts of the same salt name.
+        await tx.salt.createMany({
+          data: [{ name: rawName, description: null, active: true }],
+          skipDuplicates: true,
+        });
+        saltRecord = await tx.salt.findFirst({
+          where: { name: { equals: rawName, mode: 'insensitive' } },
+          select: { id: true, name: true, active: true },
+        });
       }
     }
 

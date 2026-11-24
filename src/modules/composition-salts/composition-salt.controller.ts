@@ -7,7 +7,7 @@ const canViewInactive = (request: Parameters<RequestHandler>[0]): boolean =>
   request.auth?.role === 'ADMIN';
 
 export const listCompositionSaltsController: RequestHandler = async (request, response) => {
-  const input = request.query as unknown as ListCompositionSaltsInput;
+  const input = (request.validatedQuery ?? request.query) as unknown as ListCompositionSaltsInput;
   if (input.includeInactive && !canViewInactive(request)) {
     throw new AppError(403, 'FORBIDDEN', 'You do not have permission to view inactive salts');
   }

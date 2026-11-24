@@ -14,7 +14,7 @@ const canViewInactive = (request: Parameters<RequestHandler>[0]): boolean =>
   request.auth?.role === 'ADMIN';
 
 export const listManufacturersController: RequestHandler = async (request, response) => {
-  const input = request.query as unknown as ListManufacturersInput;
+  const input = (request.validatedQuery ?? request.query) as unknown as ListManufacturersInput;
   if (input.includeInactive && !canViewInactive(request)) {
     throw new AppError(403, 'FORBIDDEN', 'You do not have permission to view inactive manufacturers');
   }

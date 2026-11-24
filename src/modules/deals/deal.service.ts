@@ -148,25 +148,56 @@ export const checkPendingDeal = async (
   };
 };
 
+const MAX_AGREED_SCHEME_LENGTH = 100;
+
+const assertValidDealSchemeLength = (agreedScheme: string): void => {
+  if (agreedScheme.length > MAX_AGREED_SCHEME_LENGTH) {
+    throw new AppError(
+      400,
+      'INVALID_SCHEME_LENGTH',
+      `Agreed scheme must not exceed ${MAX_AGREED_SCHEME_LENGTH} characters`,
+    );
+  }
+};
+
+const assertValidDealStatusTransition = (current: DealStatus, next: DealStatus): void => {
+  if (current === next) return;
+  if (current !== 'PENDING') {
+    throw new AppError(
+      400,
+      'INVALID_STATUS_TRANSITION',
+      `Cannot transition deal status from ${current} to ${next}`,
+    );
+  }
+};
+
 export const createDeal = async (
   input: CreateDealInput,
   createdById?: string,
   db = prisma,
 ): Promise<{ deal: PublicDeal; warning?: string }> => {
+  assertValidDealSchemeLength(input.agreedScheme);
+
   const medicine = await db.medicine.findUnique({
     where: { id: input.medicineId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, active: true },
   });
   if (!medicine) {
     throw new AppError(404, 'NOT_FOUND', 'Medicine not found');
   }
+  if (!medicine.active) {
+    throw new AppError(409, 'INACTIVE_MEDICINE', 'Cannot create a deal for an inactive medicine');
+  }
 
   const mr = await db.mR.findUnique({
     where: { id: input.mrId },
-    select: { id: true, name: true, phone: true, company: true },
+    select: { id: true, name: true, phone: true, company: true, active: true },
   });
   if (!mr) {
     throw new AppError(404, 'NOT_FOUND', 'Medical representative not found');
+  }
+  if (!mr.active) {
+    throw new AppError(409, 'INACTIVE_MR', 'Cannot create a deal with an inactive medical representative');
   }
 
   const existingPending = await db.deal.findFirst({
@@ -374,23 +405,37 @@ export const updateDeal = async (
     throw new AppError(404, 'NOT_FOUND', 'Deal not found');
   }
 
+  if (input.agreedScheme !== undefined) {
+    assertValidDealSchemeLength(input.agreedScheme);
+  }
+
+  if (input.status !== undefined) {
+    assertValidDealStatusTransition(existing.status, input.status);
+  }
+
   if (input.medicineId && input.medicineId !== existing.medicineId) {
     const medicine = await db.medicine.findUnique({
       where: { id: input.medicineId },
-      select: { id: true },
+      select: { id: true, active: true },
     });
     if (!medicine) {
       throw new AppError(404, 'NOT_FOUND', 'Medicine not found');
+    }
+    if (!medicine.active) {
+      throw new AppError(409, 'INACTIVE_MEDICINE', 'Cannot assign an inactive medicine to a deal');
     }
   }
 
   if (input.mrId && input.mrId !== existing.mrId) {
     const mr = await db.mR.findUnique({
       where: { id: input.mrId },
-      select: { id: true },
+      select: { id: true, active: true },
     });
     if (!mr) {
       throw new AppError(404, 'NOT_FOUND', 'Medical representative not found');
+    }
+    if (!mr.active) {
+      throw new AppError(409, 'INACTIVE_MR', 'Cannot assign an inactive medical representative to a deal');
     }
   }
 
@@ -482,6 +527,8 @@ export const updateDealStatus = async (
   if (!existing) {
     throw new AppError(404, 'NOT_FOUND', 'Deal not found');
   }
+
+  assertValidDealStatusTransition(existing.status, status);
 
   const isStatusChanged = status !== existing.status;
   const statusUpdatedAt = isStatusChanged ? new Date() : existing.statusUpdatedAt;

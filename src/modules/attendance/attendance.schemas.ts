@@ -1,6 +1,11 @@
 import { z } from 'zod';
+import { isValidCalendarDateString } from '../../common/date.utils.js';
 
 const attendanceStatusSchema = z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE']);
+const validDateString = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
+  .refine(isValidCalendarDateString, 'Date must be a valid calendar date');
 
 export const attendanceIdSchema = z.object({
   id: z.string().uuid(),
@@ -17,7 +22,7 @@ export const attendanceMonthQuerySchema = z.object({
 
 export const createOrUpdateAttendanceSchema = z.object({
   userId: z.string().uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
+  date: validDateString,
   status: attendanceStatusSchema,
   workUnits: z.coerce.number().min(0).max(10).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
@@ -31,7 +36,7 @@ export const patchAttendanceSchema = z.object({
 
 export const deleteAttendanceQuerySchema = z.object({
   userId: z.string().uuid().optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional(),
+  date: validDateString.optional(),
 });
 
 export type AttendanceStatusType = z.infer<typeof attendanceStatusSchema>;

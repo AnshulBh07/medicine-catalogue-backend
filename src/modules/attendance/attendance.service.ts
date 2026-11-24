@@ -1,5 +1,6 @@
 import { Prisma, type AttendanceRecord, type AttendanceStatus, type ShiftType, type User } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
+import { getIstDateParts, getIstDateString } from '../../common/date.utils.js';
 import { prisma } from '../../lib/prisma.js';
 import { toPublicUser, type PublicUser } from '../users/user.service.js';
 import type {
@@ -109,10 +110,11 @@ export interface AttendanceStore {
 export const getMonthlyAttendanceSummary = async (
   query: AttendanceMonthQueryInput,
   db: AttendanceStore = prisma,
+  now: Date = new Date(),
 ): Promise<AttendanceDashboardSummary> => {
-  const now = new Date();
-  const year = query.year !== undefined ? Number(query.year) : now.getUTCFullYear();
-  const month = query.month !== undefined ? Number(query.month) : now.getUTCMonth() + 1;
+  const istNow = getIstDateParts(now);
+  const year = query.year !== undefined ? Number(query.year) : istNow.year;
+  const month = query.month !== undefined ? Number(query.month) : istNow.month;
 
   const workingDays = getWorkingDaysInMonth(year, month);
   const { startDate, endDate } = getMonthDateRange(year, month);
@@ -242,8 +244,8 @@ export const getMonthlyAttendanceSummary = async (
   const payablePercentage =
     totalWorkingDays > 0 ? Number(((totalPayableDays / totalWorkingDays) * 100).toFixed(1)) : 100;
 
-  // Today stats
-  const todayStr = formatDateToISO(now);
+  // Today stats (IST business calendar)
+  const todayStr = getIstDateString(now);
   const todayDateUtc = parseDateStringToUTC(todayStr);
 
   const todayRecords =
@@ -311,6 +313,7 @@ export const getEmployeeMonthlyAttendance = async (
   userId: string,
   query: AttendanceMonthQueryInput,
   db: AttendanceStore = prisma,
+  now: Date = new Date(),
 ): Promise<EmployeeAttendanceDetailResult> => {
   const user = await db.user.findUnique({
     where: { id: userId },
@@ -320,9 +323,9 @@ export const getEmployeeMonthlyAttendance = async (
     throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
   }
 
-  const now = new Date();
-  const year = query.year !== undefined ? Number(query.year) : now.getUTCFullYear();
-  const month = query.month !== undefined ? Number(query.month) : now.getUTCMonth() + 1;
+  const istNow = getIstDateParts(now);
+  const year = query.year !== undefined ? Number(query.year) : istNow.year;
+  const month = query.month !== undefined ? Number(query.month) : istNow.month;
 
   const workingDays = getWorkingDaysInMonth(year, month);
   const { startDate, endDate } = getMonthDateRange(year, month);
@@ -448,15 +451,16 @@ export const createOrUpdateAttendance = async (
     };
   }
 
-  let workUnitsVal: number | null = null;
-  if (input.workUnits !== undefined && input.workUnits !== null) {
+  let workUnitsVal: number;
+  if (input.status === 'ABSENT' || input.status === 'LEAVE') {
+    // ABSENT and LEAVE never contribute nonzero work units
+    workUnitsVal = 0;
+  } else if (input.workUnits !== undefined && input.workUnits !== null) {
     workUnitsVal = Number(input.workUnits);
   } else if (input.status === 'PRESENT') {
     workUnitsVal = 2;
-  } else if (input.status === 'HALF_DAY') {
-    workUnitsVal = 1;
   } else {
-    workUnitsVal = 0;
+    workUnitsVal = 1;
   }
 
   const record = await db.attendanceRecord.upsert({
@@ -509,15 +513,17 @@ export const patchAttendance = async (
     throw new AppError(404, 'ATTENDANCE_RECORD_NOT_FOUND', 'Attendance record not found');
   }
 
+  const effectiveStatus = input.status ?? existing.status;
   let workUnitsVal: number | undefined | null = undefined;
-  if (input.workUnits !== undefined) {
+  if (effectiveStatus === 'ABSENT' || effectiveStatus === 'LEAVE') {
+    // ABSENT and LEAVE never contribute nonzero work units
+    workUnitsVal = 0;
+  } else if (input.workUnits !== undefined) {
     workUnitsVal = input.workUnits !== null ? Number(input.workUnits) : null;
   } else if (input.status === 'PRESENT') {
     workUnitsVal = 2;
   } else if (input.status === 'HALF_DAY') {
     workUnitsVal = 1;
-  } else if (input.status === 'ABSENT' || input.status === 'LEAVE') {
-    workUnitsVal = 0;
   }
 
   const updated = await db.attendanceRecord.update({

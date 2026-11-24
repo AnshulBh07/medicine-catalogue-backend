@@ -15,7 +15,7 @@ const getAuthUserId = (request: Parameters<RequestHandler>[0]): string => {
 };
 
 export const getDailyShortagesController: RequestHandler = async (req, res) => {
-  const query = req.query as unknown as ShortageDateQuery;
+  const query = (req.validatedQuery ?? req.query) as unknown as ShortageDateQuery;
   const result = await shortageService.getDailyShortages(query);
   res.status(200).json(result);
 };

@@ -22,7 +22,7 @@ const authenticatedUserId = (request: Parameters<RequestHandler>[0]): string => 
 };
 
 export const listUsersController: RequestHandler = async (request, response) => {
-  const input = request.query as unknown as ListUsersInput;
+  const input = (request.validatedQuery ?? request.query) as unknown as ListUsersInput;
   const result = await listUsers(input);
   response.status(200).json(result);
 };

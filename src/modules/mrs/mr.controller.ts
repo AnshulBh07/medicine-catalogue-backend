@@ -15,7 +15,7 @@ const canViewInactive = (request: Parameters<RequestHandler>[0]): boolean =>
   request.auth?.role === 'ADMIN';
 
 export const listMrsController: RequestHandler = async (request, response) => {
-  const input = request.query as unknown as ListMrsInput;
+  const input = (request.validatedQuery ?? request.query) as unknown as ListMrsInput;
   if (input.includeInactive && !canViewInactive(request)) {
     throw new AppError(403, 'FORBIDDEN', 'You do not have permission to view inactive MRs');
   }

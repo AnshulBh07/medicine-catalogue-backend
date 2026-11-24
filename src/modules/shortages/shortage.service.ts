@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { AppError } from '../../common/errors/app-error.js';
+import { getIstDateString, parseDateOnlyToUtc } from '../../common/date.utils.js';
 import type { ShortageStatus, ShortageUnit, Prisma } from '@prisma/client';
 import type {
   CreateShortageItemInput,
@@ -12,7 +13,7 @@ export function getUtcDateString(date: Date = new Date()): string {
 }
 
 export function parseDateToUtc(dateStr: string): Date {
-  return new Date(`${dateStr}T00:00:00.000Z`);
+  return parseDateOnlyToUtc(dateStr);
 }
 
 export interface ShortageSummaryCounts {
@@ -147,12 +148,16 @@ function formatShortageItem(
 }
 
 export const shortageService = {
-  async getDailyShortages(query: ShortageDateQuery): Promise<DailyShortageResult> {
-    const targetDateStr = query.date || getUtcDateString();
+  async getDailyShortages(
+    query: ShortageDateQuery,
+    db: typeof prisma = prisma,
+    now: Date = new Date(),
+  ): Promise<DailyShortageResult> {
+    const targetDateStr = query.date || getIstDateString(now);
     const targetDate = parseDateToUtc(targetDateStr);
 
     // 1. Calculate overall summary counts for target date (unfiltered by search/status)
-    const allDateItems = await prisma.shortageItem.findMany({
+    const allDateItems = await db.shortageItem.findMany({
       where: { date: targetDate },
       select: { status: true },
     });
@@ -207,7 +212,7 @@ export const shortageService = {
       ];
     }
 
-    const items = await prisma.shortageItem.findMany({
+    const items = await db.shortageItem.findMany({
       where,
       include: {
         medicine: {
@@ -270,9 +275,11 @@ export const shortageService = {
   async createShortageItem(
     userId: string,
     input: CreateShortageItemInput,
+    db: typeof prisma = prisma,
+    now: Date = new Date(),
   ): Promise<FormattedShortageItem> {
-    const targetDateStr = input.date || getUtcDateString();
-    const todayStr = getUtcDateString();
+    const todayStr = getIstDateString(now);
+    const targetDateStr = input.date || todayStr;
 
     if (targetDateStr < todayStr) {
       throw new AppError(
@@ -285,7 +292,7 @@ export const shortageService = {
     const targetDate = parseDateToUtc(targetDateStr);
 
     // Verify medicine exists and is active
-    const medicine = await prisma.medicine.findUnique({
+    const medicine = await db.medicine.findUnique({
       where: { id: input.medicineId },
       select: { id: true, name: true, active: true },
     });
@@ -303,7 +310,7 @@ export const shortageService = {
     }
 
     // Check for duplicate on the same day
-    const existing = await prisma.shortageItem.findUnique({
+    const existing = await db.shortageItem.findUnique({
       where: {
         medicineId_date: {
           medicineId: input.medicineId,
@@ -320,7 +327,7 @@ export const shortageService = {
       );
     }
 
-    const created = await prisma.shortageItem.create({
+    const created = await db.shortageItem.create({
       data: {
         medicineId: input.medicineId,
         date: targetDate,
@@ -356,8 +363,9 @@ export const shortageService = {
   async patchShortageItem(
     id: string,
     input: PatchShortageItemInput,
+    db: typeof prisma = prisma,
   ): Promise<FormattedShortageItem> {
-    const existing = await prisma.shortageItem.findUnique({
+    const existing = await db.shortageItem.findUnique({
       where: { id },
     });
 
@@ -387,7 +395,7 @@ export const shortageService = {
       updateData.note = input.note ? input.note.trim() : null;
     }
 
-    const updated = await prisma.shortageItem.update({
+    const updated = await db.shortageItem.update({
       where: { id },
       data: updateData,
       include: {

@@ -1,6 +1,7 @@
 import { Prisma, type Batch, type CommercialDetails, type Medicine, type User } from '@prisma/client/index';
 import { AppError } from '../../common/errors/app-error.js';
 import { prisma } from '../../lib/prisma.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import type { CreateBatchInput, ListBatchesInput, UpdateBatchInput } from './batch.schemas.js';
 
 type MedicineReference = Pick<Medicine, 'id' | 'name'>;
@@ -313,6 +314,23 @@ export const updateBatch = async (
       }
     }
 
+    // If expiryDate changed, resolve stale expiry notifications so the new date can trigger legitimately
+    if (
+      input.expiryDate !== undefined &&
+      input.expiryDate.getTime() !== existing.expiryDate.getTime()
+    ) {
+      try {
+        await NotificationService.resolveOrSupersede(
+          'MEDICINE_BATCH',
+          id,
+          ['MEDICINE_EXPIRED', 'MEDICINE_EXPIRING_SOON'],
+          tx,
+        );
+      } catch {
+        // Non-blocking notification resolution
+      }
+    }
+
     return toPublicBatch(updatedBatch, isAdmin);
   });
 };
@@ -329,5 +347,17 @@ export const deleteBatch = async (
   if (!existing) throw batchNotFound();
 
   await db.batch.delete({ where: { id } });
+
+  try {
+    await NotificationService.resolveOrSupersede(
+      'MEDICINE_BATCH',
+      id,
+      ['MEDICINE_EXPIRED', 'MEDICINE_EXPIRING_SOON'],
+      db,
+    );
+  } catch {
+    // Non-blocking notification resolution
+  }
+
   return toPublicBatch(existing, isAdmin);
 };

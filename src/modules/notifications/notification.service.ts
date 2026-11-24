@@ -6,6 +6,12 @@ import {
   type UserRole,
 } from '@prisma/client';
 import { AppError } from '../../common/errors/app-error.js';
+import {
+  addCalendarMonthsUtc,
+  formatDateOnlyIsoUtc,
+  formatDateOnlyUtc,
+  getIstDateParts,
+} from '../../common/date.utils.js';
 import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import type { ListNotificationsQueryInput } from './notification.schemas.js';
@@ -66,11 +72,7 @@ const toPublicNotification = (notif: Notification): PublicNotification => ({
 });
 
 export const formatNotificationDate = (date: Date): string => {
-  const day = date.getDate().toString().padStart(2, '0');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  return `${day} ${month} ${year}`;
+  return formatDateOnlyUtc(date);
 };
 
 export class NotificationService {
@@ -367,60 +369,76 @@ export class NotificationService {
 
   /**
    * Scheduled/Condition Check: Medicine Batch Expiry (CRITICAL).
-   * - Batch expired: batch.expiryDate <= currentDate
-   * - Batch expiring soon: currentDate < batch.expiryDate <= 2 calendar months ahead
-   * Deduplicated deterministically.
+   * - Batch expired: batch.expiryDate <= today (IST business calendar)
+   * - Batch expiring soon: today < batch.expiryDate <= 2 calendar months ahead (clamped to month-end)
+   * Filters at DB level, eliminates N+1 user/insert queries, and keys dedupeKey by batchId + expiryDate
+   * so corrected expiry dates can trigger legitimate future alerts.
    */
   static async checkExpiryConditions(
     currentDate: Date = new Date(),
     db: typeof prisma = prisma,
   ): Promise<{ expiredCount: number; expiringSoonCount: number }> {
-    // 2 calendar months comparison
-    const twoMonthsAhead = new Date(currentDate.getTime());
-    twoMonthsAhead.setMonth(twoMonthsAhead.getMonth() + 2);
+    const { year, month, day } = getIstDateParts(currentDate);
+    const todayDateOnly = new Date(Date.UTC(year, month - 1, day));
+    const twoMonthsAheadDateOnly = addCalendarMonthsUtc(year, month, day, 2);
 
-    // Fetch batches with active medicines
+    // Restrict DB selection to active medicines within the expiry window (no full-table scan)
     const batches = await db.batch.findMany({
       where: {
         medicine: { active: true },
+        expiryDate: { lte: twoMonthsAheadDateOnly },
       },
       include: {
         medicine: { select: { id: true, name: true } },
       },
     });
 
-    let expiredCount = 0;
-    let expiringSoonCount = 0;
+    if (batches.length === 0) {
+      return { expiredCount: 0, expiringSoonCount: 0 };
+    }
+
+    // Fetch active recipients once (eliminates N+1 user queries)
+    const activeUsers = await db.user.findMany({
+      where: { active: true },
+      select: { id: true },
+    });
+
+    if (activeUsers.length === 0) {
+      return { expiredCount: 0, expiringSoonCount: 0 };
+    }
+
+    const activeUserIds = activeUsers.map((u) => u.id);
+    const expiredBatchIds: string[] = [];
+    const notificationsToInsert: Prisma.NotificationCreateManyInput[] = [];
+    const expiredDedupeKeys = new Set<string>();
+    const expiringSoonDedupeKeys = new Set<string>();
 
     for (const batch of batches) {
-      const expiryDate = new Date(batch.expiryDate);
+      const rawExpiry = new Date(batch.expiryDate);
+      const expiryDateOnly = new Date(
+        Date.UTC(rawExpiry.getUTCFullYear(), rawExpiry.getUTCMonth(), rawExpiry.getUTCDate()),
+      );
+      const expiryIso = formatDateOnlyIsoUtc(expiryDateOnly);
+      const formattedDate = formatNotificationDate(expiryDateOnly);
 
-      if (expiryDate <= currentDate) {
-        // MEDICINE_EXPIRED
-        const formattedDate = formatNotificationDate(expiryDate);
+      if (expiryDateOnly <= todayDateOnly) {
+        expiredBatchIds.push(batch.id);
+        const dedupeKey = `MEDICINE_EXPIRED:${batch.id}:${expiryIso}`;
+        expiredDedupeKeys.add(dedupeKey);
+
         const title = 'Medicine expired';
         const message = `${batch.medicine.name} (Batch #${batch.batchNumber})\nexpired on ${formattedDate}.`;
-        const dedupeKey = `MEDICINE_EXPIRED:${batch.id}`;
+        const metadata: Prisma.InputJsonValue = {
+          medicineId: batch.medicine.id,
+          medicineName: batch.medicine.name,
+          batchId: batch.id,
+          batchNumber: batch.batchNumber,
+          expiryDate: expiryDateOnly.toISOString(),
+        };
 
-        // Supersede earlier expiring soon notifications for this batch
-        await db.notification.updateMany({
-          where: {
-            entityType: 'MEDICINE_BATCH',
-            entityId: batch.id,
-            type: 'MEDICINE_EXPIRING_SOON',
-            isResolved: false,
-          },
-          data: {
-            isResolved: true,
-            resolvedAt: currentDate,
-            isRead: true,
-            readAt: currentDate,
-          },
-        });
-
-        const created = await this.createForRole(
-          'ALL',
-          {
+        for (const userId of activeUserIds) {
+          notificationsToInsert.push({
+            userId,
             type: 'MEDICINE_EXPIRED',
             priority: 'CRITICAL',
             title,
@@ -428,30 +446,33 @@ export class NotificationService {
             entityType: 'MEDICINE_BATCH',
             entityId: batch.id,
             dedupeKey,
-            metadata: {
-              medicineId: batch.medicine.id,
-              medicineName: batch.medicine.name,
-              batchId: batch.id,
-              batchNumber: batch.batchNumber,
-              expiryDate: expiryDate.toISOString(),
-            },
-          },
-          { db },
-        );
+            metadata,
+            isRead: false,
+            readAt: null,
+            isResolved: false,
+            resolvedAt: null,
+          });
+        }
+      } else if (expiryDateOnly <= twoMonthsAheadDateOnly) {
+        const diffMs = expiryDateOnly.getTime() - todayDateOnly.getTime();
+        const daysRemaining = Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+        const dedupeKey = `MEDICINE_EXPIRING_SOON:${batch.id}:${expiryIso}`;
+        expiringSoonDedupeKeys.add(dedupeKey);
 
-        if (created.length > 0) expiredCount++;
-      } else if (expiryDate <= twoMonthsAhead) {
-        // MEDICINE_EXPIRING_SOON (within 2 calendar months)
-        const diffMs = expiryDate.getTime() - currentDate.getTime();
-        const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-        const formattedDate = formatNotificationDate(expiryDate);
         const title = 'Medicine expiring soon';
         const message = `${batch.medicine.name} (Batch #${batch.batchNumber}) expires\non ${formattedDate} (in ${daysRemaining} days).`;
-        const dedupeKey = `MEDICINE_EXPIRING_SOON:${batch.id}`;
+        const metadata: Prisma.InputJsonValue = {
+          medicineId: batch.medicine.id,
+          medicineName: batch.medicine.name,
+          batchId: batch.id,
+          batchNumber: batch.batchNumber,
+          expiryDate: expiryDateOnly.toISOString(),
+          daysRemaining,
+        };
 
-        const created = await this.createForRole(
-          'ALL',
-          {
+        for (const userId of activeUserIds) {
+          notificationsToInsert.push({
+            userId,
             type: 'MEDICINE_EXPIRING_SOON',
             priority: 'CRITICAL',
             title,
@@ -459,28 +480,50 @@ export class NotificationService {
             entityType: 'MEDICINE_BATCH',
             entityId: batch.id,
             dedupeKey,
-            metadata: {
-              medicineId: batch.medicine.id,
-              medicineName: batch.medicine.name,
-              batchId: batch.id,
-              batchNumber: batch.batchNumber,
-              expiryDate: expiryDate.toISOString(),
-              daysRemaining,
-            },
-          },
-          { db },
-        );
-
-        if (created.length > 0) expiringSoonCount++;
+            metadata,
+            isRead: false,
+            readAt: null,
+            isResolved: false,
+            resolvedAt: null,
+          });
+        }
       }
     }
 
-    return { expiredCount, expiringSoonCount };
+    // Batch-supersede earlier expiring-soon alerts for all expired batches in a single query
+    if (expiredBatchIds.length > 0) {
+      await db.notification.updateMany({
+        where: {
+          entityType: 'MEDICINE_BATCH',
+          entityId: { in: expiredBatchIds },
+          type: 'MEDICINE_EXPIRING_SOON',
+          isResolved: false,
+        },
+        data: {
+          isResolved: true,
+          resolvedAt: currentDate,
+          isRead: true,
+          readAt: currentDate,
+        },
+      });
+    }
+
+    if (notificationsToInsert.length > 0) {
+      await db.notification.createMany({
+        data: notificationsToInsert,
+        skipDuplicates: true,
+      });
+    }
+
+    return {
+      expiredCount: expiredDedupeKeys.size,
+      expiringSoonCount: expiringSoonDedupeKeys.size,
+    };
   }
 
   /**
    * Scheduled/Condition Check: Deal Inactivity (ATTENTION, ADMIN ONLY).
-   * Finds deals where current date >= statusUpdatedAt + 30 days.
+   * Finds PENDING deals where current date >= statusUpdatedAt + 30 days.
    * Deterministically deduplicated by dealId + statusUpdatedAt.
    */
   static async checkDealInactivity(
@@ -492,6 +535,7 @@ export class NotificationService {
 
     const inactiveDeals = await db.deal.findMany({
       where: {
+        status: 'PENDING',
         statusUpdatedAt: { lte: thresholdDate },
       },
       include: {
