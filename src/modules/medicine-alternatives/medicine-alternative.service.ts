@@ -50,10 +50,13 @@ export class MedicineAlternativeService {
    */
   static async listAlternatives(
     query?: ListMedicineAlternativesQueryInput,
+    db: typeof prisma = prisma,
   ): Promise<PublicAlternativeGroup[]> {
-    const rawItems = await prisma.medicineAlternative.findMany({
+    const rawItems = await db.medicineAlternative.findMany({
       where: {
         ...(query?.sourceMedicineId ? { sourceMedicineId: query.sourceMedicineId } : {}),
+        sourceMedicine: { active: true },
+        alternativeMedicine: { active: true },
       },
       include: {
         sourceMedicine: { select: medicineSelect },
@@ -128,7 +131,10 @@ export class MedicineAlternativeService {
   /**
    * Get alternative status for a specific medicine (both as source and as target).
    */
-  static async getByMedicineId(medicineId: string): Promise<{
+  static async getByMedicineId(
+    medicineId: string,
+    db: typeof prisma = prisma,
+  ): Promise<{
     doNotUse: PublicAlternativeGroup | null;
     isAlternativeFor: Array<{
       sourceMedicineId: string;
@@ -138,16 +144,24 @@ export class MedicineAlternativeService {
     }>;
   }> {
     const [sourceAlternatives, targetAlternatives] = await Promise.all([
-      prisma.medicineAlternative.findMany({
-        where: { sourceMedicineId: medicineId },
+      db.medicineAlternative.findMany({
+        where: {
+          sourceMedicineId: medicineId,
+          sourceMedicine: { active: true },
+          alternativeMedicine: { active: true },
+        },
         include: {
           sourceMedicine: { select: medicineSelect },
           alternativeMedicine: { select: medicineSelect },
         },
         orderBy: { createdAt: 'asc' },
       }),
-      prisma.medicineAlternative.findMany({
-        where: { alternativeMedicineId: medicineId },
+      db.medicineAlternative.findMany({
+        where: {
+          alternativeMedicineId: medicineId,
+          sourceMedicine: { active: true },
+          alternativeMedicine: { active: true },
+        },
         include: {
           sourceMedicine: { select: medicineSelect },
         },
@@ -205,9 +219,15 @@ export class MedicineAlternativeService {
   static async createAlternatives(
     userId: string,
     input: CreateMedicineAlternativeInput,
+    db: typeof prisma = prisma,
   ): Promise<PublicAlternativeGroup> {
+    const uniqueAlternativeIds = [...new Set(input.alternativeMedicineIds)];
+    if (uniqueAlternativeIds.includes(input.sourceMedicineId)) {
+      throw new AppError(400, 'BAD_REQUEST', 'A medicine cannot be an alternative to itself');
+    }
+
     // 1. Verify source medicine exists and is active
-    const sourceMedicine = await prisma.medicine.findUnique({
+    const sourceMedicine = await db.medicine.findUnique({
       where: { id: input.sourceMedicineId },
       select: medicineSelect,
     });
@@ -216,7 +236,7 @@ export class MedicineAlternativeService {
     }
 
     // 2. Check if source medicine already has alternatives configured
-    const existingCount = await prisma.medicineAlternative.count({
+    const existingCount = await db.medicineAlternative.count({
       where: { sourceMedicineId: input.sourceMedicineId },
     });
     if (existingCount > 0) {
@@ -228,15 +248,15 @@ export class MedicineAlternativeService {
     }
 
     // 3. Verify all alternative medicines exist and are active
-    const altMedicines = await prisma.medicine.findMany({
+    const altMedicines = await db.medicine.findMany({
       where: {
-        id: { in: input.alternativeMedicineIds },
+        id: { in: uniqueAlternativeIds },
         active: true,
       },
       select: medicineSelect,
     });
 
-    if (altMedicines.length !== input.alternativeMedicineIds.length) {
+    if (altMedicines.length !== uniqueAlternativeIds.length) {
       throw new AppError(
         400,
         'BAD_REQUEST',
@@ -245,9 +265,9 @@ export class MedicineAlternativeService {
     }
 
     // 4. Create in transaction
-    const createdItems = await prisma.$transaction(async (tx) => {
+    const createdItems = await db.$transaction(async (tx) => {
       const items = [];
-      for (const altId of input.alternativeMedicineIds) {
+      for (const altId of uniqueAlternativeIds) {
         const item = await tx.medicineAlternative.create({
           data: {
             sourceMedicineId: input.sourceMedicineId,
@@ -325,9 +345,12 @@ export class MedicineAlternativeService {
     userId: string,
     sourceMedicineId: string,
     input: UpdateMedicineAlternativeInput,
+    db: typeof prisma = prisma,
   ): Promise<PublicAlternativeGroup> {
+    const uniqueAlternativeIds = [...new Set(input.alternativeMedicineIds)];
+
     // 1. Verify source medicine exists
-    const sourceMedicine = await prisma.medicine.findUnique({
+    const sourceMedicine = await db.medicine.findUnique({
       where: { id: sourceMedicineId },
       select: medicineSelect,
     });
@@ -335,12 +358,12 @@ export class MedicineAlternativeService {
       throw new AppError(404, 'NOT_FOUND', 'Source medicine not found or inactive');
     }
 
-    if (input.alternativeMedicineIds.includes(sourceMedicineId)) {
+    if (uniqueAlternativeIds.includes(sourceMedicineId)) {
       throw new AppError(400, 'BAD_REQUEST', 'A medicine cannot be an alternative to itself');
     }
 
     // 2. Check that alternatives currently exist for this source
-    const existingCount = await prisma.medicineAlternative.count({
+    const existingCount = await db.medicineAlternative.count({
       where: { sourceMedicineId },
     });
     if (existingCount === 0) {
@@ -348,15 +371,15 @@ export class MedicineAlternativeService {
     }
 
     // 3. Verify all alternative medicines exist and are active
-    const altMedicines = await prisma.medicine.findMany({
+    const altMedicines = await db.medicine.findMany({
       where: {
-        id: { in: input.alternativeMedicineIds },
+        id: { in: uniqueAlternativeIds },
         active: true,
       },
       select: medicineSelect,
     });
 
-    if (altMedicines.length !== input.alternativeMedicineIds.length) {
+    if (altMedicines.length !== uniqueAlternativeIds.length) {
       throw new AppError(
         400,
         'BAD_REQUEST',
@@ -365,13 +388,13 @@ export class MedicineAlternativeService {
     }
 
     // 4. Update atomically in transaction
-    const createdItems = await prisma.$transaction(async (tx) => {
+    const createdItems = await db.$transaction(async (tx) => {
       await tx.medicineAlternative.deleteMany({
         where: { sourceMedicineId },
       });
 
       const items = [];
-      for (const altId of input.alternativeMedicineIds) {
+      for (const altId of uniqueAlternativeIds) {
         const item = await tx.medicineAlternative.create({
           data: {
             sourceMedicineId,

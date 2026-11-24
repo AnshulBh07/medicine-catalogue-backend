@@ -5,6 +5,7 @@ export const getDaysInMonth = (year: number, month: number): number => {
 };
 
 export const isWorkingDay = (_date: Date): boolean => {
+  void _date;
   // All 7 days (Monday through Sunday) are working days for the pharmacy
   return true;
 };

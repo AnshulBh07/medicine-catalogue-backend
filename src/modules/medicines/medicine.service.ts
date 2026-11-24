@@ -1,6 +1,7 @@
 import { Prisma, type Batch, type CommercialDetails, type Composition, type CompositionSalt, type Manufacturer, type Medicine, type MR, type User } from '@prisma/client/index';
 import { calculateCommercialMetrics } from '../../common/commercial.utils.js';
 import { AppError } from '../../common/errors/app-error.js';
+import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import { r2StorageService } from '../../services/storage/r2.service.js';
 import { NotificationService } from '../notifications/notification.service.js';
@@ -930,7 +931,14 @@ export const updateMedicine = async (
   const result = await (db as unknown as typeof prisma).$transaction(runUpdate);
 
   if (oldImageUrlToDelete) {
-    await r2StorageService.deleteObjectByPublicUrl(oldImageUrlToDelete);
+    try {
+      await r2StorageService.deleteObjectByPublicUrl(oldImageUrlToDelete);
+    } catch (storageErr) {
+      logger.warn(
+        { err: storageErr, medicineId: result.id },
+        'Failed to delete replaced medicine image from R2 storage',
+      );
+    }
   }
 
   try {
@@ -969,7 +977,14 @@ export const deactivateMedicine = async (
   })) as MedicineRecord);
 
   if (existing.imageUrl) {
-    await r2StorageService.deleteObjectByPublicUrl(existing.imageUrl);
+    try {
+      await r2StorageService.deleteObjectByPublicUrl(existing.imageUrl);
+    } catch (storageErr) {
+      logger.warn(
+        { err: storageErr, medicineId: result.id },
+        'Failed to delete deactivated medicine image from R2 storage',
+      );
+    }
   }
 
   try {

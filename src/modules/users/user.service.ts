@@ -34,6 +34,9 @@ export interface UserStore {
   commercialDetails?: {
     count(args?: Prisma.CommercialDetailsCountArgs): PromiseLike<number>;
   };
+  attendanceRecord?: {
+    count(args?: Prisma.AttendanceRecordCountArgs): PromiseLike<number>;
+  };
 }
 
 export const toPublicUser = (user: User): PublicUser => {
@@ -176,6 +179,28 @@ export const updateUser = async (
     throw new AppError(400, 'CANNOT_DEACTIVATE_SELF', 'You cannot deactivate your own account');
   }
 
+  // F-038B: Ensure update does not clear both email and phone
+  const nextEmail =
+    input.email !== undefined
+      ? input.email && input.email.trim().length > 0
+        ? input.email.trim().toLowerCase()
+        : null
+      : existingUser.email;
+  const nextPhone =
+    input.phone !== undefined
+      ? input.phone && input.phone.trim().length > 0
+        ? input.phone.trim()
+        : null
+      : existingUser.phone;
+
+  if (!nextEmail && !nextPhone) {
+    throw new AppError(
+      400,
+      'CONTACT_REQUIRED',
+      'At least one contact method (email or phone) is required',
+    );
+  }
+
   let passwordHash: string | undefined;
   if (input.password) {
     passwordHash = await argon2.hash(input.password);
@@ -186,8 +211,8 @@ export const updateUser = async (
       where: { id: targetUserId },
       data: {
         name: input.name !== undefined ? input.name : undefined,
-        email: input.email !== undefined ? (input.email ? input.email.trim().toLowerCase() : null) : undefined,
-        phone: input.phone !== undefined ? (input.phone ? input.phone.trim() : null) : undefined,
+        email: input.email !== undefined ? nextEmail : undefined,
+        phone: input.phone !== undefined ? nextPhone : undefined,
         role: input.role !== undefined ? (input.role as $Enums.UserRole) : undefined,
         active: input.active !== undefined ? input.active : undefined,
         monthlySalary: input.monthlySalary !== undefined ? (input.monthlySalary === null ? null : input.monthlySalary) : undefined,
@@ -247,19 +272,28 @@ export const deleteUser = async (
     throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
   }
 
-  // Check if user has updated commercial details
-  if (db.commercialDetails) {
-    const commercialCount = await db.commercialDetails.count({
-      where: { updatedBy: targetUserId },
-    });
+  // F-032A: Preserve historical payroll/attendance and commercial records — prevent destructive hard delete
+  const [commercialCount, attendanceCount] = await Promise.all([
+    db.commercialDetails
+      ? db.commercialDetails.count({ where: { updatedBy: targetUserId } })
+      : Promise.resolve(0),
+    db.attendanceRecord
+      ? db.attendanceRecord.count({ where: { userId: targetUserId } })
+      : Promise.resolve(0),
+  ]);
 
-    if (commercialCount > 0) {
-      throw new AppError(
-        409,
-        'USER_HAS_DEPENDENCIES',
-        'User has recorded commercial updates and cannot be permanently deleted. Please deactivate the account instead.',
-      );
-    }
+  if (commercialCount > 0 || attendanceCount > 0) {
+    const reason =
+      attendanceCount > 0 && commercialCount > 0
+        ? 'historical attendance/payroll and commercial records'
+        : attendanceCount > 0
+          ? 'historical attendance/payroll records'
+          : 'recorded commercial updates';
+    throw new AppError(
+      409,
+      'USER_HAS_DEPENDENCIES',
+      `User has ${reason} and cannot be permanently deleted. Please deactivate the account instead.`,
+    );
   }
 
   const oldProfileImageUrl = existingUser.profileImageUrl;
@@ -270,7 +304,14 @@ export const deleteUser = async (
     });
 
     if (oldProfileImageUrl) {
-      await r2StorageService.deleteObjectByPublicUrl(oldProfileImageUrl);
+      try {
+        await r2StorageService.deleteObjectByPublicUrl(oldProfileImageUrl);
+      } catch (storageErr) {
+        logger.warn(
+          { err: storageErr, deletedUserId: targetUserId },
+          'Failed to delete user profile image from R2 storage after user deletion',
+        );
+      }
     }
 
     logger.info(
@@ -320,6 +361,28 @@ export const updateProfile = async (
     throw new AppError(404, 'USER_NOT_FOUND', 'User not found');
   }
 
+  // F-038B: Prevent profile update from clearing both email and phone
+  const nextEmail =
+    input.email !== undefined
+      ? input.email && input.email.trim().length > 0
+        ? input.email.trim().toLowerCase()
+        : null
+      : existingUser.email;
+  const nextPhone =
+    input.phone !== undefined
+      ? input.phone && input.phone.trim().length > 0
+        ? input.phone.trim()
+        : null
+      : existingUser.phone;
+
+  if (!nextEmail && !nextPhone) {
+    throw new AppError(
+      400,
+      'CONTACT_REQUIRED',
+      'At least one contact method (email or phone) is required',
+    );
+  }
+
   const oldProfileImageUrl = existingUser.profileImageUrl;
 
   try {
@@ -327,8 +390,8 @@ export const updateProfile = async (
       where: { id: userId },
       data: {
         name: input.name !== undefined ? input.name : undefined,
-        email: input.email !== undefined ? (input.email ? input.email.trim().toLowerCase() : null) : undefined,
-        phone: input.phone !== undefined ? (input.phone ? input.phone.trim() : null) : undefined,
+        email: input.email !== undefined ? nextEmail : undefined,
+        phone: input.phone !== undefined ? nextPhone : undefined,
         profileImageUrl: input.profileImageUrl !== undefined ? input.profileImageUrl : undefined,
       },
     });

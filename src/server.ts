@@ -1,4 +1,5 @@
 import { app } from './app.js';
+import { createGracefulShutdown } from './common/shutdown.utils.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { prisma } from './lib/prisma.js';
@@ -17,36 +18,11 @@ const startServer = async (): Promise<void> => {
     logger.info(`Medicine Catalogue API started on ${host}:${env.PORT} (${env.NODE_ENV})`);
   });
 
-  let shuttingDown = false;
-  const shutdown = async (signal: string): Promise<void> => {
-    if (shuttingDown) {
-      return;
-    }
-
-    shuttingDown = true;
-    logger.info(`Received ${signal}; shutting down gracefully`);
-    stopNotificationScheduler();
-
-    // Force terminate if cleanup hangs longer than 10 seconds
-    const forceExitTimeout = setTimeout(() => {
-      logger.error('Graceful shutdown timed out after 10s; forcing exit');
-      process.exit(1);
-    }, 10000);
-    forceExitTimeout.unref();
-
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        resolve();
-      });
-    });
-
-    await prisma.$disconnect();
-  };
+  const shutdown = createGracefulShutdown({
+    server,
+    disconnectDb: () => prisma.$disconnect(),
+    stopScheduler: stopNotificationScheduler,
+  });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => {

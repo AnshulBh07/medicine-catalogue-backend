@@ -14,7 +14,6 @@ import {
   getDaysInMonth,
   getMonthDateRange,
   getWorkingDaysInMonth,
-  isWorkingDay,
   parseDateStringToUTC,
 } from './attendance.utils.js';
 
